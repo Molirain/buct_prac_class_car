@@ -3,10 +3,12 @@
 #include "cmsis_os2.h"
 #include "driver/ultrasonic.h"
 #include "driver/encoder.h"
+#include "driver/MPU6050.h"
+
+extern osMessageQueueId_t xSensorQueue;
 
 void AppTaskSensor(void *argument) {
     // 1. 传感器初始化
-    UltrasonicDriver_Init();
 
     // 2. 任务无限循环
     for(;;) {

@@ -108,7 +108,8 @@ const osThreadAttr_t task_comm_attributes = {
   0
 };
 /* USER CODE BEGIN PV */
-
+osMessageQueueId_t xMotorQueue;
+osMessageQueueId_t xSensorQueue;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -200,6 +201,8 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  xMotorQueue = osMessageQueueNew(10, sizeof(MotorCommand), NULL);
+  xSensorQueue = osMessageQueueNew(10, sizeof(SensorData), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */

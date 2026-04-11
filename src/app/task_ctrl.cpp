@@ -4,7 +4,8 @@
 
 void AppTaskCtrl(void *argument) {
     // 1. 算法初始化
-    
+    osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
+
     // 2. 任务无限循环
     for(;;) {
         // 迷宫算法求解 / 路径规划...
