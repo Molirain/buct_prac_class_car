@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "app/tasks.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,30 +58,54 @@ UART_HandleTypeDef huart3;
 /* Definitions for task_motor */
 osThreadId_t task_motorHandle;
 const osThreadAttr_t task_motor_attributes = {
-  .name = "task_motor",
-  .stack_size = 4096 * 4,
-  .priority = (osPriority_t) osPriorityRealtime,
+  "task_motor",
+  0,
+  NULL,
+  0,
+  NULL,
+  4096 * 4,
+  (osPriority_t) osPriorityRealtime,
+  0,
+  0
 };
 /* Definitions for task_sensor */
 osThreadId_t task_sensorHandle;
 const osThreadAttr_t task_sensor_attributes = {
-  .name = "task_sensor",
-  .stack_size = 4096 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
+  "task_sensor",
+  0,
+  NULL,
+  0,
+  NULL,
+  4096 * 4,
+  (osPriority_t) osPriorityHigh,
+  0,
+  0
 };
 /* Definitions for task_ctrl */
 osThreadId_t task_ctrlHandle;
 const osThreadAttr_t task_ctrl_attributes = {
-  .name = "task_ctrl",
-  .stack_size = 8192 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
+  "task_ctrl",
+  0,
+  NULL,
+  0,
+  NULL,
+  8192 * 4,
+  (osPriority_t) osPriorityHigh,
+  0,
+  0
 };
 /* Definitions for task_comm */
 osThreadId_t task_commHandle;
 const osThreadAttr_t task_comm_attributes = {
-  .name = "task_comm",
-  .stack_size = 2048 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  "task_comm",
+  0,
+  NULL,
+  0,
+  NULL,
+  2048 * 4,
+  (osPriority_t) osPriorityLow,
+  0,
+  0
 };
 /* USER CODE BEGIN PV */
 
@@ -818,11 +842,7 @@ static void MX_GPIO_Init(void)
 void MotorTaskEnter(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  AppTaskMotor(argument);
   /* USER CODE END 5 */
 }
 
@@ -836,11 +856,7 @@ void MotorTaskEnter(void *argument)
 void SensorTaskEnter(void *argument)
 {
   /* USER CODE BEGIN SensorTaskEnter */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  AppTaskSensor(argument);
   /* USER CODE END SensorTaskEnter */
 }
 
@@ -854,11 +870,7 @@ void SensorTaskEnter(void *argument)
 void DFSTaskEntry(void *argument)
 {
   /* USER CODE BEGIN DFSTaskEntry */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  AppTaskCtrl(argument);
   /* USER CODE END DFSTaskEntry */
 }
 
@@ -872,11 +884,7 @@ void DFSTaskEntry(void *argument)
 void CommTaskEnter(void *argument)
 {
   /* USER CODE BEGIN CommTaskEnter */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  AppTaskComm(argument);
   /* USER CODE END CommTaskEnter */
 }
 
