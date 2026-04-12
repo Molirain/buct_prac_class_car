@@ -21,6 +21,7 @@ struct MotorCommand
 struct SensorData
 {
     int16_t distance[3]; // 0 ~ 2,左中右
+    double Yaw;
 };
 #endif
 
