@@ -1,6 +1,7 @@
 ﻿#ifndef APP_TASKS_H
 #define APP_TASKS_H
 #include "main.h"
+#include "driver/MPU6050.h"
 
 #ifdef __cplusplus
 extern "C" {
