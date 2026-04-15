@@ -17,6 +17,10 @@ void AppTaskMotor(void *argument) {
     motor[1].begin();
     
     MotorCommand cmd;
+    cmd.speed_percent[0] = 0;
+    cmd.speed_percent[1] = 0;
+    motor[0].setSpeed(0);
+    motor[1].setSpeed(0);
 
     for(;;){
         if(osMessageQueueGet(xMotorQueue, &cmd, NULL, osWaitForever) == osOK) {
