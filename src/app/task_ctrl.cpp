@@ -25,7 +25,7 @@ TURN_DIRECTION nextTurn;
 void AppTaskCtrl(void *argument) {
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
 
-    bool isOver = false; // 是否完成迷宫，用于后续完善 send 功能
+    // bool isOver = false; // 是否完成迷宫，用于后续完善 send 功能
     SensorData sensorData;
     SensorData lastSensorData;
     double yaw;
@@ -33,8 +33,8 @@ void AppTaskCtrl(void *argument) {
     yaw = sensorData.Yaw;
     double target_yaw; // 目标角度
     MotorCommand ctrl;
-    double baseSpeed = 50.0; // 基础速度，后续完善 PID 时会用到
-    double right_dist_set = 10.0; // 靠右的距离
+    double baseSpeed = BASE_SPEED; // 基础速度，后续完善 PID 时会用到
+    double right_dist_set = BASE_RIGHT_D; // 靠右的距离
     uint8_t right_over_num = 0; // 右侧连续三次超出距离才右转，避免误判
     uint8_t left_over_num = 0; // 左侧连续三次超出距离才左转，避免误判
     uint8_t back_over_num = 0; // 前方连续三次超出距离才后转，避免误判
@@ -63,18 +63,21 @@ void AppTaskCtrl(void *argument) {
                 moveState = PRE_TURN;
                 nextTurn = RIGHT;
                 target_yaw = yaw + 90.0;
+                last_turn_error = 90.0;
                 break;
             }
             if(left_over_num >= 3){
                 moveState = PRE_TURN;
                 nextTurn = LEFT;
                 target_yaw = yaw - 90.0;
+                last_turn_error = -90.0;
                 break;
             }
             if(back_over_num >= 3){
                 moveState = PRE_TURN;
                 nextTurn = BACK;
                 target_yaw = yaw + 180.0;
+                last_turn_error = 180.0;
                 break;
             }
             osMessageQueueGet(xSensorQueue, &sensorData, NULL, osWaitForever);
@@ -106,15 +109,14 @@ void AppTaskCtrl(void *argument) {
             break;
 
         case TURN:
-            switch (nextTurn)
-            {
-            case RIGHT:
-                /* code */
-                break;
-            
-            default:
+            osMessageQueueGet(xSensorQueue, &sensorData, NULL, osWaitForever);
+            yaw = sensorData.Yaw;
+
+            if(turn(yaw, &last_turn_error, target_yaw, &ctrl)){
+                moveState = AFTER_TURN;
                 break;
             }
+            last_turn_error = target_yaw - yaw;
             break;
 
         case AFTER_TURN:
@@ -159,4 +161,15 @@ void forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, Se
     ctrl->speed_percent[0] = baseSpeed + Kp * error + Kd * (error - last_error);
     ctrl->speed_percent[1] = baseSpeed - Kp * error - Kd * (error - last_error);
     speedHold(ctrl);
+}
+
+bool turn(double cur_yaw, double* last_error, double target_yaw, MotorCommand* ctrl)
+{
+    double error = target_yaw - cur_yaw;
+    if(error < 2 && error > -2){
+        return true;
+    }
+    // 这里简单的 P 控制，后续可以完善 PID
+
+    return false;
 }

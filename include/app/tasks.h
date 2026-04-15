@@ -2,6 +2,7 @@
 #define APP_TASKS_H
 #include "main.h"
 #include "driver/MPU6050.h"
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,10 +31,12 @@ struct SensorData
 void speedHold(MotorCommand* input);
 
 // 直行
-void forward(MotorCommand* ctrl, double baseSpeed, SensorData* sensorData, SensorData* lastSensorData);
+void forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData);
 
 // 转弯
 bool turn(double cur_yaw, double* last_error, double target_yaw, MotorCommand* ctrl);
+
+// 直行，已距离为参数
 
 #endif
 
