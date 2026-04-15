@@ -14,16 +14,27 @@ void AppTaskComm(void *argument);
 
 #ifdef __cplusplus
 }
+
 struct MotorCommand
 {
-    int8_t speed_percent[2]; // 速度百分比，-100 ~ 100
+    double speed_percent[2]; // 速度百分比，-100 ~ 100
 };
 
 struct SensorData
 {
-    int16_t distance[3]; // 0 ~ 2,左中右
+    double distance[3]; // 0 ~ 2,左中右
     double Yaw;
 };
+
+// 保证速度在 -100 ~ 100 之间，按比例缩小
+void speedHold(MotorCommand* input);
+
+// 直行
+void forward(MotorCommand* ctrl, double baseSpeed, SensorData* sensorData, SensorData* lastSensorData);
+
+// 转弯
+bool turn(double cur_yaw, double* last_error, double target_yaw, MotorCommand* ctrl);
+
 #endif
 
 #endif // APP_TASKS_H

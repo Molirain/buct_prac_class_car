@@ -13,19 +13,32 @@ enum MOVE_STATE{
     STOP
 };
 
+enum TURN_DIRECTION{
+    LEFT,
+    RIGHT,
+    BACK
+};
+
 MOVE_STATE moveState = STOP;
+TURN_DIRECTION nextTurn;
 
 void AppTaskCtrl(void *argument) {
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
 
     bool isOver = false; // 是否完成迷宫，用于后续完善 send 功能
     SensorData sensorData;
-    int yaw;
+    SensorData lastSensorData;
+    double yaw;
     osMessageQueueGet(xSensorQueue, &sensorData, NULL, osWaitForever); // 获取初始航向角
     yaw = sensorData.Yaw;
+    double target_yaw; // 目标角度
     MotorCommand ctrl;
-    uint8_t baseSpeed = 50; // 基础速度，后续完善 PID 时会用到
+    double baseSpeed = 50.0; // 基础速度，后续完善 PID 时会用到
+    double right_dist_set = 10.0; // 靠右的距离
     uint8_t right_over_num = 0; // 右侧连续三次超出距离才右转，避免误判
+    uint8_t left_over_num = 0; // 左侧连续三次超出距离才左转，避免误判
+    uint8_t back_over_num = 0; // 前方连续三次超出距离才后转，避免误判
+    double last_turn_error;
 
     // 等待开始按钮按下
     for(;;){
@@ -48,14 +61,44 @@ void AppTaskCtrl(void *argument) {
         case FORWARD:
             if(right_over_num >= 3){
                 moveState = PRE_TURN;
+                nextTurn = RIGHT;
+                target_yaw = yaw + 90.0;
+                break;
+            }
+            if(left_over_num >= 3){
+                moveState = PRE_TURN;
+                nextTurn = LEFT;
+                target_yaw = yaw - 90.0;
+                break;
+            }
+            if(back_over_num >= 3){
+                moveState = PRE_TURN;
+                nextTurn = BACK;
+                target_yaw = yaw + 180.0;
                 break;
             }
             osMessageQueueGet(xSensorQueue, &sensorData, NULL, osWaitForever);
+            yaw = sensorData.Yaw;
             if(sensorData.distance[2] > 16){
                 right_over_num++;
             } else {
                 right_over_num = 0;
             }
+            if(sensorData.distance[1] < 18){
+                if(sensorData.distance[0] > 30){
+                    left_over_num++;
+                } else {
+                    left_over_num = 0;
+                    back_over_num++;
+                }
+            } else {
+                left_over_num = 0;
+                back_over_num = 0;
+            }
+            forward(&ctrl, baseSpeed, right_dist_set, &sensorData, &lastSensorData);
+            osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
+            lastSensorData = sensorData;
+
             break;
         
         case PRE_TURN:
@@ -63,7 +106,15 @@ void AppTaskCtrl(void *argument) {
             break;
 
         case TURN:
-            /* code */
+            switch (nextTurn)
+            {
+            case RIGHT:
+                /* code */
+                break;
+            
+            default:
+                break;
+            }
             break;
 
         case AFTER_TURN:
@@ -83,4 +134,29 @@ void AppTaskCtrl(void *argument) {
         // 延时让出CPU
         osDelay(20);
     }
+}
+
+void speedHold(MotorCommand* input)
+{
+    double left = input->speed_percent[0];
+    double right = input->speed_percent[1];
+    if(left < 0) left = -left;
+    if(right < 0) right = -right;
+    double max = left > right ? left : right;
+    if(max > 100){
+        input->speed_percent[0] = input->speed_percent[0] / max * 100;
+        input->speed_percent[1] = input->speed_percent[1] / max * 100;
+    }
+}
+
+void forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
+{
+    double error = sensorData->distance[2] - right_distance_set;
+    double last_error = lastSensorData->distance[2] - right_distance_set;
+    double Kp = 2.0;
+    double Kd = 1.0;
+
+    ctrl->speed_percent[0] = baseSpeed + Kp * error + Kd * (error - last_error);
+    ctrl->speed_percent[1] = baseSpeed - Kp * error - Kd * (error - last_error);
+    speedHold(ctrl);
 }
