@@ -5,6 +5,16 @@
 extern osMessageQueueId_t xMotorQueue;
 extern osMessageQueueId_t xSensorQueue;
 
+enum MOVE_STATE{
+    FORWARD,
+    PRE_TURN,
+    TURN,
+    AFTER_TURN,
+    STOP
+};
+
+MOVE_STATE moveState = STOP;
+
 void AppTaskCtrl(void *argument) {
     // 1. 算法初始化
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
