@@ -16,9 +16,10 @@ void Motor::setSpeed(int speed) {
     if(speed > 100) speed = 100;
     if(speed < -100) speed = -100;
     
-    // 2. 将百分比转换为 PWM 比较值 (假设你在 CubeMX 里把 Counter Period(ARR) 设为了 1000)
-    // 如果你的 ARR 是其他值，请把这里的 1000 换成你的 ARR 值！
-    uint32_t pwm_value = (std::abs(speed) * 1000) / 100;
+    // 2. 动态获取当前定时器的 ARR 值
+    uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim);
+    // 防止 uint32_t 溢出，使用 uint64_t 计算
+    uint32_t pwm_value = (uint32_t)(((uint64_t)std::abs(speed) * arr) / 100);
     
     // 3. 硬件下发执行
     if (speed > 0) {
@@ -32,8 +33,8 @@ void Motor::setSpeed(int speed) {
         __HAL_TIM_SET_COMPARE(htim, ch_in2, pwm_value);
     }
     else {
-        // 刹车：全拉高或全拉低
-        __HAL_TIM_SET_COMPARE(htim, ch_in1, 1000);
-        __HAL_TIM_SET_COMPARE(htim, ch_in2, 1000);
+        // 刹车：全拉高或全拉低 (优先使用全 0，即双低coast，适应更多驱动板防直通并解决起步乱转)
+        __HAL_TIM_SET_COMPARE(htim, ch_in1, 0);
+        __HAL_TIM_SET_COMPARE(htim, ch_in2, 0);
     }
 }

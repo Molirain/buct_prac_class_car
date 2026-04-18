@@ -5,6 +5,7 @@
 
 extern TIM_HandleTypeDef htim5;  // 左电机
 extern TIM_HandleTypeDef htim12; // 右电机
+extern UART_HandleTypeDef huart1;
 extern osMessageQueueId_t xMotorQueue;
 
 void AppTaskMotor(void *argument) {
@@ -21,6 +22,8 @@ void AppTaskMotor(void *argument) {
     cmd.speed_percent[1] = 0;
     motor[0].setSpeed(0);
     motor[1].setSpeed(0);
+
+    HAL_UART_Transmit(&huart1, (uint8_t*)"TASK Motor Start!\r\n", 19, 100);
 
     for(;;){
         if(osMessageQueueGet(xMotorQueue, &cmd, NULL, osWaitForever) == osOK) {

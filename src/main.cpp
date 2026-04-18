@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define GPIO_TEST_MODE 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -208,6 +208,8 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
+  HAL_UART_Transmit(&huart1, (uint8_t*)"Creating Tasks...\r\n", 18, 100);
+#if !GPIO_TEST_MODE
   /* creation of task_motor */
   task_motorHandle = osThreadNew(MotorTaskEnter, NULL, &task_motor_attributes);
 
@@ -218,7 +220,8 @@ int main(void)
   task_ctrlHandle = osThreadNew(DFSTaskEntry, NULL, &task_ctrl_attributes);
 
   /* creation of task_comm */
-  task_commHandle = osThreadNew(CommTaskEnter, NULL, &task_comm_attributes);
+  // task_commHandle = osThreadNew(CommTaskEnter, NULL, &task_comm_attributes);
+#endif
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -238,7 +241,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+    // 置空
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -529,7 +532,7 @@ static void MX_TIM5_Init(void)
   htim5.Instance = TIM5;
   htim5.Init.Prescaler = 0;
   htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim5.Init.Period = 4294967295;
+  htim5.Init.Period = 65535;
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
