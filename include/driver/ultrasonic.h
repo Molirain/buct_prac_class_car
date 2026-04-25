@@ -14,12 +14,14 @@ private:
     volatile uint32_t risingTime;
     volatile uint32_t fallingTime;
     volatile bool isWaitingEcho;
+    uint32_t triggerStartTick;
     
     // 用来记录当前是在等上升沿还是下降沿，替代读寄存器
     volatile bool isWaitingFallingEdge; 
 
     volatile float distanceCm;
     const float MAX_DIST = 200.0f;
+    static constexpr uint32_t ECHO_TIMEOUT_MS = 30;
 
     static SonarSensor* instanceMap[MAX_SONARS];
 

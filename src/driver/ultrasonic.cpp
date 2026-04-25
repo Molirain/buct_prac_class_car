@@ -10,6 +10,7 @@ SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin,
     fallingTime = 0;
     distanceCm = MAX_DIST;
     isWaitingEcho = false;
+    triggerStartTick = 0;
     isWaitingFallingEdge = false; // 初始化为不等待下降沿
 
     uint8_t index = (channel >> 2) & 0x03;
@@ -24,9 +25,21 @@ void SonarSensor::Init() {
 }
 
 void SonarSensor::Trigger() {
-    if (isWaitingEcho) return;
+    if (isWaitingEcho) {
+        uint32_t now = HAL_GetTick();
+        if ((now - triggerStartTick) < ECHO_TIMEOUT_MS) {
+            return;
+        }
+
+        // 回波超时，释放 busy 防止冷启动偶发卡死在等待状态。
+        isWaitingEcho = false;
+        isWaitingFallingEdge = false;
+        __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
+        distanceCm = MAX_DIST;
+    }
 
     isWaitingEcho = true;
+    triggerStartTick = HAL_GetTick();
     isWaitingFallingEdge = false; // 触发时，复位状态，准备先抓上升沿
 
     HAL_GPIO_WritePin(triggerPort, triggerPin, GPIO_PIN_SET);

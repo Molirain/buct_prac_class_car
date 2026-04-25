@@ -43,6 +43,19 @@ void AppTaskSensor(void *argument) {
     sonarLeft.Init();
     sonarFront.Init();
     sonarRight.Init();
+
+    // 冷启动时先做几轮预读，丢弃首帧偶发异常值（常见为 200cm）。
+    for (int i = 0; i < 3; ++i) {
+        sonarLeft.Trigger();
+        sonarFront.Trigger();
+        sonarRight.Trigger();
+        osDelay(pdMS_TO_TICKS(25));
+    }
+
+    sensorData.distance[0] = sonarLeft.GetDistanceCm();
+    sensorData.distance[1] = sonarFront.GetDistanceCm();
+    sensorData.distance[2] = sonarRight.GetDistanceCm();
+
     HAL_UART_Transmit(&huart1, (uint8_t*)"TASK Sensor Start!\r\n", 20, 100);
 
     for(;;) {
