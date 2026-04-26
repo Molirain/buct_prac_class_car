@@ -21,7 +21,7 @@ static const EncoderConfig kEncoderCfg = {
     .alpha           = 0.3f,     // IIR滤波系数 (0,1]，越小越平滑
 };
 
-// MPU6050 gyro(&hi2c1);
+MPU6050 gyro(&hi2c1);
 // 模板参数与定时器位宽严格对应
 // TIM2 = 32-bit, TIM3 = 16-bit
 static Encoder<uint32_t> gEncLeft (&htim2, kEncoderCfg);   // 左轮编码器
@@ -33,11 +33,11 @@ static SonarSensor sonarFront(TRIG_FRONT_GPIO_Port, TRIG_FRONT_Pin, &htim4, TIM_
 static SonarSensor sonarRight(TRIG_RIGHT_GPIO_Port, TRIG_RIGHT_Pin, &htim4, TIM_CHANNEL_3);
 
 // 里程计：轴距145mm
-static DiffDriveOdometry gOdometry(0.145f);
+static DiffDriveOdometry classic(0.145f);
 SensorData sensorData;
 
 void AppTaskSensor(void *argument) {
-    // gyro.begin();
+    gyro.begin();
     gEncLeft.begin();
     gEncRight.begin();
     sonarLeft.Init();
@@ -45,7 +45,7 @@ void AppTaskSensor(void *argument) {
     sonarRight.Init();
 
     // 冷启动时先做几轮预读，丢弃首帧偶发异常值（常见为 200cm）。
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 3; i++) {
         sonarLeft.Trigger();
         sonarFront.Trigger();
         sonarRight.Trigger();
@@ -57,11 +57,12 @@ void AppTaskSensor(void *argument) {
     sensorData.distance[2] = sonarRight.GetDistanceCm();
 
     HAL_UART_Transmit(&huart1, (uint8_t*)"TASK Sensor Start!\r\n", 20, 100);
+    uint32_t tick = osKernelGetTickCount();
 
     for(;;) {
-        // 等待 I2C DMA 的二值信号量，最大等待 10ms，非阻塞读取数据！
-        // gyro.update_DMA();
-        // sensorData.Yaw = gyro.getYaw();
+        // 阻塞读取 MPU6050 陀螺仪 Z 轴角速度，积分计算航向角
+        gyro.update();
+        sensorData.Yaw = gyro.getYaw();
 
         sonarLeft.Trigger();
         sonarFront.Trigger();
@@ -76,7 +77,7 @@ void AppTaskSensor(void *argument) {
         float dRight = vRight * kDt;
 
         // 更新里程计
-        gOdometry.update(dLeft, dRight);
+        classic.update(dLeft, dRight);
 
         int32_t l_mm = (int32_t)(gEncLeft.getOdometryDistance_m() * 1000.0f);
         int32_t r_mm = (int32_t)(gEncRight.getOdometryDistance_m() * 1000.0f);
@@ -92,6 +93,7 @@ void AppTaskSensor(void *argument) {
 
         osMessageQueuePut(xSensorQueue, &sensorData, 0, osWaitForever);
 
-        osDelay(pdMS_TO_TICKS(10));
+        tick += pdMS_TO_TICKS(10);
+        osDelayUntil(tick);
     }
 }

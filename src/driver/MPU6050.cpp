@@ -3,8 +3,6 @@
 // 构造函数初始化列表
 MPU6050::MPU6050(I2C_HandleTypeDef* i2c_handle) 
     : hi2c(i2c_handle), yaw(0.0f), gyroZ_offset(0.0f), lastTime(0) {
-    // 创建 FreeRTOS 二值信号量
-    dmaSemaphore = osSemaphoreNew(1, 0, NULL);
 }
 
 // 封装底层 I2C 写操作
@@ -79,30 +77,4 @@ float MPU6050::getYaw() {
 // 重置角度
 void MPU6050::resetYaw() {
     yaw = 0.0f;
-}
-
-// 🌟 核心非阻塞读取方法
-void MPU6050::update_DMA() {
-    // 1. 命令 DMA 去搬砖，CPU 直接撒手不管
-    HAL_I2C_Mem_Read_DMA(hi2c, MPU_ADDR, REG_GYRO_ZOUT_H, I2C_MEMADD_SIZE_8BIT, dmaRxBuffer, 2);
-
-    // 2. CPU 在这里挂起休眠，死等 DMA 的信号量，绝对不空转消耗算力！
-    if (osSemaphoreAcquire(dmaSemaphore, 10) == osOK) { // 最大等10ms超时
-        
-        // 3. 被唤醒了！说明 DMA 已经把数据完美地放进了 dmaRxBuffer
-        int16_t rawZ = (dmaRxBuffer[0] << 8) | dmaRxBuffer[1];
-        float realRawZ = (float)rawZ - gyroZ_offset;
-        float gyroZ_rate = realRawZ / 16.4f;
-
-        uint32_t currentTime = HAL_GetTick();
-        float dt = (currentTime - lastTime) / 1000.0f;
-        lastTime = currentTime;
-
-        yaw += gyroZ_rate * dt;
-    }
-}
-
-// 给外部 C 语言回调函数暴露的接口，用于释放信号量
-void MPU6050::dmaCompleteCallback() {
-    osSemaphoreRelease(dmaSemaphore);
 }

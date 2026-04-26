@@ -837,14 +837,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-extern "C" {
-    void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c) // 传完数据的回调函数
-    {
-        if (hi2c->Instance == I2C1) {
-            gyro.dmaCompleteCallback();
-        }
-    }
-}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_MotorTaskEnter */

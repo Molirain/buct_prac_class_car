@@ -6,14 +6,16 @@ extern osMessageQueueId_t xMotorQueue;
 extern osMessageQueueId_t xSensorQueue;
 extern UART_HandleTypeDef huart1;
 
+// 有限状态机参量
 enum MOVE_STATE{
-    FORWARD,
-    PRE_TURN,
-    TURN,
-    AFTER_TURN,
-    STOP
+    FORWARD, // 直行
+    PRE_TURN, // 转弯前需要前进一点点
+    TURN, // 转弯中
+    AFTER_TURN, // 转弯后也需要前进一点点
+    STOP // 停止，用于开始前和结束后
 };
 
+// 下一步的转弯方向
 enum TURN_DIRECTION{
     LEFT,
     RIGHT,
@@ -26,10 +28,10 @@ TURN_DIRECTION nextTurn;
 void AppTaskCtrl(void *argument) {
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
 
-    // bool isOver = false; // 是否完成迷宫，用于后续完善 send 功能
+    bool isOver = false; // 是否完成迷宫，用于后续完善 send 功能
     SensorData sensorData;
     SensorData lastSensorData;
-    double yaw;
+    double yaw; // Z角度，不做标准化处理，随着转向可能叠加到几千（当然是右转更多的前提下），顺时针为正
     osMessageQueueGet(xSensorQueue, &sensorData, NULL, osWaitForever); // 获取初始航向角
     yaw = sensorData.Yaw;
     double target_yaw; // 目标角度
@@ -41,6 +43,7 @@ void AppTaskCtrl(void *argument) {
     uint8_t right_over_num = 0; // 右侧连续三次超出距离才右转，避免误判
     uint8_t left_over_num = 0; // 左侧连续三次超出距离才左转，避免误判
     uint8_t back_over_num = 0; // 前方连续三次超出距离才后转，避免误判
+    uint8_t isOver_num = 0; // 超过三次到达停止条件才暂停
 
     bool isFirstAfterTurn = true;
     uint64_t firstAfterTurnL = 0;
@@ -67,9 +70,9 @@ void AppTaskCtrl(void *argument) {
 
     // 清空不需要的历史数据，代替 reset 以防止 xQueueReset 导致的死锁
     SensorData dumpSensor;
-    while(osMessageQueueGet(xSensorQueue, &dumpSensor, NULL, 0) == osOK) {}
+    while(osMessageQueueGet(xSensorQueue, &dumpSensor, NULL, 0) == osOK);
     MotorCommand dumpMotor;
-    while(osMessageQueueGet(xMotorQueue, &dumpMotor, NULL, 0) == osOK) {}
+    while(osMessageQueueGet(xMotorQueue, &dumpMotor, NULL, 0) == osOK);
     
     // 初始化 lastSensorData，防止未初始化的垃圾数据干扰第一次PID
     osMessageQueueGet(xSensorQueue, &lastSensorData, NULL, osWaitForever);
@@ -77,6 +80,12 @@ void AppTaskCtrl(void *argument) {
     moveState = FORWARD;
 
     for(;;){
+        if(isOver){
+            ctrl.speed_percent[0] = 0;
+            ctrl.speed_percent[1] = 1;
+            osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
+            osDelay(1000);
+        }
         // 有限状态机
         switch (moveState)
         {

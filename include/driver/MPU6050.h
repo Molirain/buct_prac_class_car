@@ -1,11 +1,9 @@
 ﻿#pragma once
 #include "stm32h7xx_hal.h"
-#include "cmsis_os.h"
 
 class MPU6050 {
 private:
     I2C_HandleTypeDef* hi2c;
-    osSemaphoreId_t dmaSemaphore; // 专属二值信号量
     
     // MPU6050 寄存器地址大全
     const uint8_t MPU_ADDR = (0x68 << 1); // 模块接GND的7位地址左移一位
@@ -22,9 +20,6 @@ private:
     float gyroZ_offset; // 陀螺仪零点漂移误差
     uint32_t lastTime;  // 上次读取的时间戳
 
-    // 分配在连续内存区的 DMA 接收缓冲
-    ALIGN_32BYTES(uint8_t dmaRxBuffer[2]);
-    
     // 封装底层 I2C 操作
     void writeByte(uint8_t reg, uint8_t data);
     void readBytes(uint8_t reg, uint8_t* buffer, uint16_t size);
@@ -44,10 +39,4 @@ public:
     
     // 重置航向角为0
     void resetYaw();
-
-    // 🌟 核心非阻塞读取方法
-    void update_DMA();
-
-    // 给外部 C 语言回调函数暴露的接口，用于释放信号量
-    void dmaCompleteCallback();
 };
