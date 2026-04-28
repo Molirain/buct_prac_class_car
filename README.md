@@ -1,5 +1,5 @@
 # 迷宫小车
-> by [Molirain](https://github.com/Molirain-jy)
+> by [Molirain](https://github.com/Molirain)
 
 ## First: 禁止 vibe coding ！
 
