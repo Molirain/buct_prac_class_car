@@ -1,8 +1,8 @@
 ﻿#include "driver/motor.h"
 #include <cmath>
 
-Motor::Motor(TIM_HandleTypeDef* timer, uint32_t in1, uint32_t in2) 
-    : htim(timer), ch_in1(in1), ch_in2(in2) {
+Motor::Motor(TIM_HandleTypeDef* timer, uint32_t in1, uint32_t in2, float deadband, float trim)
+    : htim(timer), ch_in1(in1), ch_in2(in2), deadband(deadband), trim(trim) {
     // 使用初始化列表进行成员初始化
 }
 
@@ -18,8 +18,10 @@ void Motor::setSpeed(int speed) {
     
     // 2. 动态获取当前定时器的 ARR 值
     uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim);
-    // 防止 uint32_t 溢出，使用 uint64_t 计算
-    uint32_t pwm_value = (uint32_t)(((uint64_t)std::abs(speed) * arr) / 100);
+    uint32_t abs_speed = std::abs(speed);
+    abs_speed = deadband + (abs_speed/100.0)*(100.0-deadband); // 可选：线性映射，保持死区不变
+    uint32_t pwm_value = (uint32_t)((abs_speed * arr) / 100);
+    pwm_value *= trim; // 应用配平系数
     
     // 3. 硬件下发执行
     if (speed > 0) {

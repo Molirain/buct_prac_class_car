@@ -6,8 +6,11 @@ private:
     TIM_HandleTypeDef* htim;
     uint32_t ch_in1;
     uint32_t ch_in2;
+    float deadband; // 死区
+    float trim; // 配平系数
+
 public:
-    Motor(TIM_HandleTypeDef* timer, uint32_t in1, uint32_t in2);
+    Motor(TIM_HandleTypeDef* timer, uint32_t in1, uint32_t in2, float deadband = 15.0f, float trim = 1.0f);
     
     void begin(); 
     
