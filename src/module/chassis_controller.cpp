@@ -11,6 +11,45 @@ void ChassisController::begin()
     gotoStartPlace();
 }
 
+void ChassisController::setAction(RobotAction action)
+{
+    currentAction = action;
+
+    switch (action){
+        case RobotAction::MOVE_FORWARD:
+            moveState = MoveState::FORWARD;
+            break;
+
+        case RobotAction::TURN_LEFT:
+            nextTurn = TurnDirection::LEFT;
+            moveState = MoveState::PRE_TURN;
+            break;
+
+        case RobotAction::TURN_RIGHT:
+            nextTurn = TurnDirection::RIGHT;
+            moveState = MoveState::PRE_TURN;
+            break;
+
+        case RobotAction::TURN_BACK:
+            nextTurn = TurnDirection::BACK;
+            moveState = MoveState::PRE_TURN;
+            break;
+
+        default:
+            moveState = MoveState::STOP;
+            break;
+    }
+}
+
+void ChassisController::update(const SensorData& sensor, MotorCommand& cmd)
+{
+    currentSensorData = sensor;
+
+    switch(moveState){
+        // to be writen
+    }
+}
+
 void ChassisController::waitForStartButton()
 {    
     for(;;){
@@ -32,6 +71,14 @@ void ChassisController::gotoStartPlace()
 {
     for(;;){
         osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever);
+        if(currentSensorData.distance[2] < 30.0){
+            ctrl.speed_percent[0] = 0;
+            ctrl.speed_percent[1] = 0;
+            osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
+            currentAction = RobotAction::IDLE;
+            moveState = MoveState::STOP;
+            break;
+        }
         forward_withDiff(&ctrl, 30.0, &currentSensorData, &lastSensorData);
         osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
     }
@@ -68,4 +115,21 @@ void ChassisController::forward_withDiff(MotorCommand* ctrl, double baseSpeed, S
     ctrl->speed_percent[1] = baseSpeed + correction;
 
     speedHold(ctrl);
+}
+
+void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
+{
+    double error = sensorData->distance[2] - right_distance_set;
+    double last_error = lastSensorData->distance[2] - right_distance_set;
+    double Kp = 2.0;
+    double Kd = 1.0;
+
+    ctrl->speed_percent[0] = baseSpeed + Kp * error + Kd * (error - last_error);
+    ctrl->speed_percent[1] = baseSpeed - Kp * error - Kd * (error - last_error);
+    speedHold(ctrl);
+}
+
+bool ChassisController::isIdle() const
+{
+    return currentAction == RobotAction::IDLE;
 }

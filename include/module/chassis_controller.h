@@ -13,7 +13,6 @@ extern UART_HandleTypeDef huart1;
 class ChassisController
 {
     public:
-        ChassisController();
         void begin();
         void setAction(RobotAction action);
         bool isIdle() const; // 判断是否处于待机状态
@@ -35,5 +34,4 @@ class ChassisController
                             SensorData* sensorData, SensorData* lastSensorData); // 用编码器走直线
         void forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set,
                     SensorData* sensorData, SensorData* lastSensorData); // 用右侧距离走直线
-        
 };
