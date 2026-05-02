@@ -41,13 +41,70 @@ void ChassisController::setAction(RobotAction action)
     }
 }
 
-void ChassisController::update(const SensorData& sensor, MotorCommand& cmd)
+void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, const WallInfo& walls)
 {
     currentSensorData = sensor;
 
     switch(moveState){
-        // to be writen
+        case MoveState::FORWARD:
+            forward(&cmd, 30.0, BASE_RIGHT_D, &currentSensorData, &lastSensorData);
+            if(currentSensorData.distance[1] < FRONT_STOP_D || shouldTurn(walls)){
+                currentAction = RobotAction::IDLE;
+                moveState = MoveState::STOP;
+            }
+            break;
+        
+        case MoveState::PRE_TURN:
+            if(isFirstPreTurn){
+                firstPreTurnL = currentSensorData.L[0];
+                isFirstPreTurn = false;
+            }
+            if(currentSensorData.L[0] - firstPreTurnL > 30){ 
+                moveState = MoveState::TURN;
+                isFirstPreTurn = true;
+            } else {
+                // 【修正】：把 ctrl 改成 cmd
+                forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
+            }
+            break;
+
+        case MoveState::TURN:
+            accum_L[0] += currentSensorData.L[0];
+            accum_L[1] += currentSensorData.L[1];
+            // 【修正】：把 ctrl 改成 cmd
+            if(turn(target_yaw, accum_L, last_error_L, &cmd)){
+                moveState = MoveState::AFTER_TURN;
+                isFirstAfterTurn = true;
+            }
+            break;
+
+        case MoveState::AFTER_TURN:
+            if(isFirstAfterTurn){
+                firstAfterTurnL = currentSensorData.L[0];
+                isFirstAfterTurn = false;
+            }
+            if(currentSensorData.L[0] - firstAfterTurnL > 30){ 
+                moveState = MoveState::STOP;
+                currentAction = RobotAction::IDLE;
+                isFirstAfterTurn = true;
+            } else {
+                // 【修正】：把 ctrl 改成 cmd
+                forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
+            }
+            break;
+
+        case MoveState::STOP:
+            // 【修正】：把 ctrl 改成 cmd
+            cmd.speed_percent[0] = 0;
+            cmd.speed_percent[1] = 0;
+            break;
+        
+        default:
+            break;
     }
+
+    // 【优化】：统一在帧末尾保存历史数据，干掉冗余代码
+    lastSensorData = currentSensorData;
 }
 
 void ChassisController::waitForStartButton()
@@ -72,15 +129,15 @@ void ChassisController::gotoStartPlace()
     for(;;){
         osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever);
         if(currentSensorData.distance[2] < 30.0){
-            ctrl.speed_percent[0] = 0;
-            ctrl.speed_percent[1] = 0;
-            osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
+            cmd.speed_percent[0] = 0;
+            cmd.speed_percent[1] = 0;
+            osMessageQueuePut(xMotorQueue, &cmd, 0, osWaitForever);
             currentAction = RobotAction::IDLE;
             moveState = MoveState::STOP;
             break;
         }
-        forward_withDiff(&ctrl, 30.0, &currentSensorData, &lastSensorData);
-        osMessageQueuePut(xMotorQueue, &ctrl, 0, osWaitForever);
+        forward_withDiff(&cmd, 30.0, &currentSensorData, &lastSensorData);
+        osMessageQueuePut(xMotorQueue, &cmd, 0, osWaitForever);
     }
 }
 
@@ -129,7 +186,45 @@ void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double rig
     speedHold(ctrl);
 }
 
+bool ChassisController::turn(double target_angle, double* accum_L, double* last_error_L, MotorCommand* ctrl)
+{
+    // 轮距为145mm，将目标角度（顺时针为正）转换为左右轮距离
+    double track_width = 145.0;
+    double target_L = (3.1415926 * track_width * target_angle) / 360.0;
+
+    // 左轮顺时针转需要向前走（正），右轮需要向后走（负）
+    double error_L0 = target_L - accum_L[0];  // 左轮误差
+    double error_L1 = -target_L - accum_L[1]; // 右轮误差
+
+    // 如果左右轮误差都在2mm以内，认为转弯完成
+    if (error_L0 < 2.0 && error_L0 > -2.0 && error_L1 < 2.0 && error_L1 > -2.0) {
+        return true;
+    }
+
+    // PD 控制
+    double Kp = 1.0; // P 参数，根据实际需要调节
+    double Kd = 0.5; // D 参数
+
+    ctrl->speed_percent[0] = Kp * error_L0 + Kd * (error_L0 - last_error_L[0]);
+    ctrl->speed_percent[1] = Kp * error_L1 + Kd * (error_L1 - last_error_L[1]);
+
+    speedHold(ctrl);
+
+    last_error_L[0] = error_L0;
+    last_error_L[1] = error_L1;
+
+    return false;
+}
+
 bool ChassisController::isIdle() const
 {
     return currentAction == RobotAction::IDLE;
+}
+
+bool ChassisController::shouldTurn(const WallInfo& walls)
+{
+    if (!walls.leftWall || !walls.rightWall){
+        return true;
+    }
+    return false;
 }

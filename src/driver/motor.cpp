@@ -15,13 +15,13 @@ void Motor::setSpeed(double speed) {
     // 1. 限幅保护，防止输入越界
     if(speed > 100) speed = 100;
     if(speed < -100) speed = -100;
-    if(should_trim) speed = to_trim(speed);
     
     // 2. 动态获取当前定时器的 ARR 值
     uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim);
-    uint32_t abs_speed = std::abs(speed);
-    abs_speed = deadband + (abs_speed/100.0)*(100.0-deadband); // 可选：线性映射，保持死区不变
-    uint32_t pwm_value = (uint32_t)((abs_speed * arr) / 100);
+    double var = std::abs(speed);
+    var = deadband + (var/100.0)*(100.0-deadband); // 可选：线性映射，保持死区不变
+    if(should_trim) var = to_trim(var);
+    uint32_t pwm_value = (uint32_t)((var * arr) / 100);
     
     // 3. 硬件下发执行
     if (speed > 0) {
