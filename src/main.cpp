@@ -204,7 +204,7 @@ int main(void)
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   xMotorQueue = osMessageQueueNew(10, sizeof(MotorCommand), NULL);
-  xSensorQueue = osMessageQueueNew(10, sizeof(SensorData), NULL);
+  xSensorQueue = osMessageQueueNew(1, sizeof(SensorData), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */

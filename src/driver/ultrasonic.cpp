@@ -2,6 +2,21 @@
 
 SonarSensor* SonarSensor::instanceMap[MAX_SONARS] = {nullptr};
 
+static inline void DelayUs(uint32_t us) {
+    if ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) == 0U) {
+        CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    }
+    if ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) == 0U) {
+        DWT->CYCCNT = 0U;
+        DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    }
+
+    uint32_t start = DWT->CYCCNT;
+    uint32_t ticks = (SystemCoreClock / 1000000U) * us;
+    while ((DWT->CYCCNT - start) < ticks) {
+    }
+}
+
 SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin, 
                          TIM_HandleTypeDef* htim, uint32_t channel) 
     : triggerPort(trigPort), triggerPin(trigPin), htimIC(htim), timChannel(channel) {
@@ -10,7 +25,6 @@ SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin,
     fallingTime = 0;
     distanceCm = MAX_DIST;
     isWaitingEcho = false;
-    triggerStartTick = 0;
     isWaitingFallingEdge = false; // 初始化为不等待下降沿
 
     uint8_t index = (channel >> 2) & 0x03;
@@ -25,25 +39,13 @@ void SonarSensor::Init() {
 }
 
 void SonarSensor::Trigger() {
-    if (isWaitingEcho) {
-        uint32_t now = HAL_GetTick();
-        if ((now - triggerStartTick) < ECHO_TIMEOUT_MS) {
-            return;
-        }
-
-        // 回波超时，释放 busy 防止冷启动偶发卡死在等待状态。
-        isWaitingEcho = false;
-        isWaitingFallingEdge = false;
-        __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
-        distanceCm = MAX_DIST;
-    }
+    if (isWaitingEcho) return;
 
     isWaitingEcho = true;
-    triggerStartTick = HAL_GetTick();
     isWaitingFallingEdge = false; // 触发时，复位状态，准备先抓上升沿
 
     HAL_GPIO_WritePin(triggerPort, triggerPin, GPIO_PIN_SET);
-    for(volatile int i=0; i<100; i++); 
+    DelayUs(12); // HC-SR04 needs >=10us trigger high pulse
     HAL_GPIO_WritePin(triggerPort, triggerPin, GPIO_PIN_RESET);
 }
 
@@ -53,6 +55,10 @@ float SonarSensor::GetDistanceCm() {
 
 // --- 核心逻辑修改：用状态位判断极性 ---
 void SonarSensor::Internal_IC_Callback(uint32_t capture_value) {
+    if (!isWaitingEcho) {
+        return;
+    }
+
     if (!isWaitingFallingEdge) {
         // 状态1：当前没有在等下降沿，说明抓到的是上升沿
         risingTime = capture_value;
@@ -74,6 +80,9 @@ void SonarSensor::Internal_IC_Callback(uint32_t capture_value) {
         }
 
         distanceCm = (pulseWidthUs * 0.034f) / 2.0f;
+        if (distanceCm > MAX_DIST) {
+            distanceCm = MAX_DIST;
+        }
 
         // 硬件极性切回上升沿，准备下一次触发
         __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
@@ -83,8 +92,6 @@ void SonarSensor::Internal_IC_Callback(uint32_t capture_value) {
 
 // --- 【新增】C++ 静态路由函数 ---
 void SonarSensor::TIM_IC_Callback_Router(TIM_HandleTypeDef *htim) {
-    if (htim->Instance != TIM4) return;
-
     HAL_TIM_ActiveChannel activeChannel = HAL_TIM_GetActiveChannel(htim);
     uint8_t index = 255;
 
@@ -98,7 +105,7 @@ void SonarSensor::TIM_IC_Callback_Router(TIM_HandleTypeDef *htim) {
     // 这里是类的内部，可以合法访问 private 成员 instanceMap 和 timChannel
     SonarSensor* obj = instanceMap[index];
 
-    if (obj != nullptr) {
+    if ((obj != nullptr) && (obj->htimIC == htim)) {
         uint32_t capVal = HAL_TIM_ReadCapturedValue(htim, obj->timChannel);
         obj->Internal_IC_Callback(capVal);
     }

@@ -1,6 +1,7 @@
 ﻿#include "app/tasks.h"
 #include "cmsis_os2.h"
 #include "FreeRTOS.h"
+#include <queue.h>
 #include "driver/ultrasonic.h"
 #include "driver/encoder.h"
 #include "driver/MPU6050.h"
@@ -37,6 +38,7 @@ static DiffDriveOdometry classic(0.145f);
 SensorData sensorData;
 
 void AppTaskSensor(void *argument) {
+    QueueHandle_t xSQ = (QueueHandle_t)xSensorQueue;
     gyro.begin();
     gEncLeft.begin();
     gEncRight.begin();
@@ -91,7 +93,7 @@ void AppTaskSensor(void *argument) {
         sensorData.L[0] = l_mm;
         sensorData.L[1] = r_mm;
 
-        osMessageQueuePut(xSensorQueue, &sensorData, 0, osWaitForever);
+        xQueueOverwrite(xSQ, &sensorData);
 
         tick += pdMS_TO_TICKS(10);
         osDelayUntil(tick);

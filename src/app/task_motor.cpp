@@ -34,12 +34,13 @@ float trim[102] = {
     97.01, 97.00, 98.54, 99.47, 100.00, 100.00
 };
 
+// 0为左，1为右
+static Motor motor[2] = {
+    Motor(&htim5, TIM_CHANNEL_3, TIM_CHANNEL_4, DEADZONE_L, trim, true), // 左
+    Motor(&htim12, TIM_CHANNEL_2, TIM_CHANNEL_1, DEADZONE_R, nullptr, false)  // 右
+};
+
 void AppTaskMotor(void *argument) {
-    // 0为左，1为右
-    Motor motor[2] = {
-        Motor(&htim5, TIM_CHANNEL_3, TIM_CHANNEL_4, DEADZONE_L, trim, true), // 左
-        Motor(&htim12, TIM_CHANNEL_2, TIM_CHANNEL_1, DEADZONE_R, nullptr, false)  // 右
-    };
     motor[0].begin();
     motor[1].begin();
     
@@ -57,6 +58,5 @@ void AppTaskMotor(void *argument) {
             motor[0].setSpeed(cmd.speed_percent[0]);
             motor[1].setSpeed(cmd.speed_percent[1]);
         }
-        osDelay(10);
     }
 }
