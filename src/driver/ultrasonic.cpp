@@ -23,6 +23,7 @@ SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin,
     
     risingTime = 0;
     fallingTime = 0;
+    lastTriggerTime = 0;
     distanceCm = MAX_DIST;
     isWaitingEcho = false;
     isWaitingFallingEdge = false; // 初始化为不等待下降沿
@@ -35,14 +36,27 @@ SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin,
 
 void SonarSensor::Init() {
     __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
-    HAL_TIM_IC_Start_IT(htimIC, timChannel);
+    HAL_StatusTypeDef ret = HAL_TIM_IC_Start_IT(htimIC, timChannel);
 }
 
 void SonarSensor::Trigger() {
-    if (isWaitingEcho) return;
+    if (isWaitingEcho) {
+        // HC-SR04 最长回波大约在 38ms 结束，如果超过 50ms 还没触发回调，说明丢中断或线异常了，触发超时自恢复
+        if (HAL_GetTick() - lastTriggerTime < 50) {
+            return; // 还在合理通信时间内，坚决不打断原流程
+        }
+        // 以下是超时急救：清空假死状态
+        distanceCm = MAX_DIST; 
+    }
 
+    lastTriggerTime = HAL_GetTick();
     isWaitingEcho = true;
     isWaitingFallingEdge = false; // 触发时，复位状态，准备先抓上升沿
+
+    // 万一卡在硬件极性等下降沿阶段，强制扭回抓上升沿（遵循 ST 官方的安全顺序）
+    TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_DISABLE);
+    __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
+    TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_ENABLE);
 
     HAL_GPIO_WritePin(triggerPort, triggerPin, GPIO_PIN_SET);
     DelayUs(12); // HC-SR04 needs >=10us trigger high pulse
@@ -64,8 +78,10 @@ void SonarSensor::Internal_IC_Callback(uint32_t capture_value) {
         risingTime = capture_value;
         isWaitingFallingEdge = true; // 切换状态：下次就是抓下降沿了
         
-        // 硬件极性切为下降沿
+        // 硬件极性切为下降沿（必须先Disable通道再修改极性才最安全）
+        TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_DISABLE);
         __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_FALLING);
+        TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_ENABLE);
     } 
     else {
         // 状态2：抓到的是下降沿
@@ -84,8 +100,10 @@ void SonarSensor::Internal_IC_Callback(uint32_t capture_value) {
             distanceCm = MAX_DIST;
         }
 
-        // 硬件极性切回上升沿，准备下一次触发
+        // 硬件极性切回上升沿（必须先Disable通道再修改极性才最安全），准备下一次触发
+        TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_DISABLE);
         __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
+        TIM_CCxChannelCmd(htimIC->Instance, timChannel, TIM_CCx_ENABLE);
         isWaitingEcho = false; 
     }
 }

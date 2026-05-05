@@ -18,6 +18,8 @@ private:
     // 用来记录当前是在等上升沿还是下降沿，替代读寄存器
     volatile bool isWaitingFallingEdge; 
 
+    uint32_t lastTriggerTime; // 记录上次触发的时间，用于超时恢复
+
     volatile float distanceCm;
     const float MAX_DIST = 200.0f;
 

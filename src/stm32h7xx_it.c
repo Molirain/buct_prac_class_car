@@ -57,6 +57,8 @@
 /* External variables --------------------------------------------------------*/
 extern DMA_HandleTypeDef hdma_i2c1_rx;
 extern I2C_HandleTypeDef hi2c1;
+extern TIM_HandleTypeDef htim4;
+extern TIM_HandleTypeDef htim8;
 extern TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN EV */
@@ -190,6 +192,20 @@ void TIM1_UP_IRQHandler(void)
 }
 
 /**
+  * @brief This function handles TIM4 global interrupt.
+  */
+void TIM4_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM4_IRQn 0 */
+
+  /* USER CODE END TIM4_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim4);
+  /* USER CODE BEGIN TIM4_IRQn 1 */
+
+  /* USER CODE END TIM4_IRQn 1 */
+}
+
+/**
   * @brief This function handles I2C1 event interrupt.
   */
 void I2C1_EV_IRQHandler(void)
@@ -201,6 +217,20 @@ void I2C1_EV_IRQHandler(void)
   /* USER CODE BEGIN I2C1_EV_IRQn 1 */
 
   /* USER CODE END I2C1_EV_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM8 capture compare interrupt.
+  */
+void TIM8_CC_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM8_CC_IRQn 0 */
+
+  /* USER CODE END TIM8_CC_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim8);
+  /* USER CODE BEGIN TIM8_CC_IRQn 1 */
+
+  /* USER CODE END TIM8_CC_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

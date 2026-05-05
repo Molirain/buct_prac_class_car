@@ -29,8 +29,9 @@ static Encoder<uint32_t> gEncLeft (&htim2, kEncoderCfg);   // 左轮编码器
 static Encoder<uint16_t> gEncRight(&htim3, kEncoderCfg);   // 右轮编码器
 
 extern TIM_HandleTypeDef htim4;
-static SonarSensor sonarLeft(TRIG_LEFT_GPIO_Port, TRIG_LEFT_Pin, &htim4, TIM_CHANNEL_2);
-static SonarSensor sonarFront(TRIG_FRONT_GPIO_Port, TRIG_FRONT_Pin, &htim4, TIM_CHANNEL_1);
+extern TIM_HandleTypeDef htim8;
+static SonarSensor sonarLeft(TRIG_LEFT_GPIO_Port, TRIG_LEFT_Pin, &htim8, TIM_CHANNEL_1);
+static SonarSensor sonarFront(TRIG_FRONT_GPIO_Port, TRIG_FRONT_Pin, &htim8, TIM_CHANNEL_2);
 static SonarSensor sonarRight(TRIG_RIGHT_GPIO_Port, TRIG_RIGHT_Pin, &htim4, TIM_CHANNEL_3);
 
 // 里程计：轴距145mm

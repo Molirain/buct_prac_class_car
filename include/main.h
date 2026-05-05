@@ -63,7 +63,7 @@ void Error_Handler(void);
 #define TRIG_FRONT_GPIO_Port GPIOD
 #define TRIG_LEFT_Pin GPIO_PIN_1
 #define TRIG_LEFT_GPIO_Port GPIOD
-#define TRIG_RIGHT_Pin GPIO_PIN_2
+#define TRIG_RIGHT_Pin GPIO_PIN_5
 #define TRIG_RIGHT_GPIO_Port GPIOD
 #define BTN_START_Pin GPIO_PIN_3
 #define BTN_START_GPIO_Port GPIOD
