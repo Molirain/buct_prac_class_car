@@ -6,6 +6,7 @@
 #include "cmsis_os2.h"
 #include <FreeRTOS.h>
 #include "config.h"
+#include <QuickPID.h>
 
 extern osMessageQueueId_t xSensorQueue;
 extern osMessageQueueId_t xMotorQueue;
@@ -20,6 +21,11 @@ class ChassisController
         void update(const SensorData& sensor, MotorCommand& cmd, const WallInfo& walls); // PID 等
 
     private:
+        float pid_input = 0.0f;
+        float pid_output = 0.0f;
+        float pid_setpoint = 0.0f;
+        QuickPID centerPID = QuickPID(&pid_input, &pid_output, &pid_setpoint);
+
         RobotAction currentAction = RobotAction::IDLE; // 当前状态
         MoveState moveState = MoveState::STOP; // 运动状态
         TurnDirection nextTurn; // 下一步转向
@@ -29,8 +35,9 @@ class ChassisController
         MotorCommand cmd;
         bool isFirstAfterTurn = true;
         bool isFirstPreTurn = true;
-        double accum_L[2] = {0, 0}; // 转弯过程中累计的里程增量
-        double last_error_L[2] = {0, 0}; // 转弯过程中上一次的里程误差，用于 PD 控制
+        bool isFirstTurn = true;
+        float start_yaw = 0.0f;
+        float last_yaw_error = 0.0f;
         double firstAfterTurnL = 0; // 转弯后前进的起始里程
         double firstPreTurnL = 0; // 转弯前前进的起始里程
 
@@ -41,6 +48,6 @@ class ChassisController
                             SensorData* sensorData, SensorData* lastSensorData); // 用编码器走直线
         void forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set,
                     SensorData* sensorData, SensorData* lastSensorData); // 用右侧距离走直线
-        bool turn(double target_angle, double* accum_L, double* last_error_L, MotorCommand* ctrl); // 转弯
+        bool turn(double target_angle_diff, float current_yaw, MotorCommand* ctrl); // 转弯
         bool shouldTurn(const WallInfo& walls); // 判断是否需要转弯
 };

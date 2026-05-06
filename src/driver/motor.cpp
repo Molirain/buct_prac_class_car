@@ -7,6 +7,8 @@ Motor::Motor(TIM_HandleTypeDef* timer, uint32_t in1, uint32_t in2, float deadban
 }
 
 void Motor::begin() {
+    __HAL_TIM_SET_COMPARE(htim, ch_in1, 0);
+    __HAL_TIM_SET_COMPARE(htim, ch_in2, 0);
     HAL_TIM_PWM_Start(htim, ch_in1);
     HAL_TIM_PWM_Start(htim, ch_in2);
 }

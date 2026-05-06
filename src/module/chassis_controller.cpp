@@ -3,11 +3,17 @@
 
 void ChassisController::begin()
 {
+    centerPID.SetTunings(1.5f, 0.05f, 0.5f);
+    centerPID.SetOutputLimits(-40.0f, 40.0f);
+    centerPID.SetSampleTimeUs(10000);
+    centerPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
+    centerPID.SetMode(QuickPID::Control::automatic);
+
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
     waitForStartButton();
     osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever); // 获取初始航向角
     // 初始化 lastSensorData，防止未初始化的垃圾数据干扰第一次PID
-    osMessageQueueGet(xSensorQueue, &lastSensorData, NULL, osWaitForever);
+    lastSensorData = currentSensorData;
     gotoStartPlace();
 }
 
@@ -22,17 +28,20 @@ void ChassisController::setAction(RobotAction action)
 
         case RobotAction::TURN_LEFT:
             nextTurn = TurnDirection::LEFT;
+            target_yaw = -90.0;
             moveState = MoveState::PRE_TURN;
             break;
 
         case RobotAction::TURN_RIGHT:
             nextTurn = TurnDirection::RIGHT;
+            target_yaw = 90.0;
             moveState = MoveState::PRE_TURN;
             break;
 
         case RobotAction::TURN_BACK:
             nextTurn = TurnDirection::BACK;
-            moveState = MoveState::PRE_TURN;
+            target_yaw = 180.0;
+            moveState = MoveState::TURN;
             break;
 
         default:
@@ -62,17 +71,14 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
             if(currentSensorData.L[0] - firstPreTurnL > 30){ 
                 moveState = MoveState::TURN;
                 isFirstPreTurn = true;
+                isFirstTurn = true;
             } else {
-                // 【修正】：把 ctrl 改成 cmd
                 forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
             }
             break;
 
         case MoveState::TURN:
-            accum_L[0] += currentSensorData.L[0];
-            accum_L[1] += currentSensorData.L[1];
-            // 【修正】：把 ctrl 改成 cmd
-            if(turn(target_yaw, accum_L, last_error_L, &cmd)){
+            if(turn(target_yaw, currentSensorData.Yaw, &cmd)){
                 moveState = MoveState::AFTER_TURN;
                 isFirstAfterTurn = true;
             }
@@ -88,13 +94,11 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                 currentAction = RobotAction::IDLE;
                 isFirstAfterTurn = true;
             } else {
-                // 【修正】：把 ctrl 改成 cmd
                 forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
             }
             break;
 
         case MoveState::STOP:
-            // 【修正】：把 ctrl 改成 cmd
             cmd.speed_percent[0] = 0;
             cmd.speed_percent[1] = 0;
             break;
@@ -138,6 +142,7 @@ void ChassisController::gotoStartPlace()
         }
         forward_withDiff(&cmd, 30.0, &currentSensorData, &lastSensorData);
         osMessageQueuePut(xMotorQueue, &cmd, 0, osWaitForever);
+        lastSensorData = currentSensorData;
     }
 }
 
@@ -162,8 +167,8 @@ void ChassisController::forward_withDiff(MotorCommand* ctrl, double baseSpeed, S
     double last_diff = lastSensorData->speed[0] - lastSensorData->speed[1];
 
     // PD 控制参数（针对速度差值，speed 单位如果为 m/s 值较小，Kp可能需要较大，具体请根据实际调参）
-    double Kp = 50.0; 
-    double Kd = 10.0; 
+    double Kp = 150.0; 
+    double Kd = 30.0; 
 
     // 计算修正量：如果左轮快 (diff > 0)，需要减小左轮，增加右轮
     double correction = Kp * diff + Kd * (diff - last_diff);
@@ -176,43 +181,89 @@ void ChassisController::forward_withDiff(MotorCommand* ctrl, double baseSpeed, S
 
 void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
 {
-    double error = sensorData->distance[2] - right_distance_set;
-    double last_error = lastSensorData->distance[2] - right_distance_set;
-    double Kp = 2.0;
-    double Kd = 1.0;
+    static int debounce_cnt = 0;
+    static float filtered_R = 100.0f;
+    const float LIMIT_DIST = 150.0f;
+    const float SPIKE_THRESHOLD = 30.0f;
 
-    ctrl->speed_percent[0] = baseSpeed + Kp * error + Kd * (error - last_error);
-    ctrl->speed_percent[1] = baseSpeed - Kp * error - Kd * (error - last_error);
+    float read_R = sensorData->distance[2];
+
+    if (read_R >= LIMIT_DIST) {
+        debounce_cnt = 0;
+        filtered_R = 200.0f;
+    } else {
+        if (std::abs(read_R - filtered_R) > SPIKE_THRESHOLD) {
+            debounce_cnt++;
+            if (debounce_cnt >= 5) {
+                filtered_R = read_R;
+                debounce_cnt = 0;
+            }
+        } else {
+            filtered_R = read_R;
+            debounce_cnt = 0;
+        }
+    }
+
+    if (filtered_R > 120.0f) {
+        forward_withDiff(ctrl, baseSpeed, sensorData, lastSensorData);
+        centerPID.Reset();
+        return;
+    }
+
+    pid_input = filtered_R;
+    pid_setpoint = right_distance_set;
+    centerPID.Compute();
+    
+    float correction = pid_output;
+    
+    auto limit_speed = [](float v) -> float {
+        if (v > 50.0f) return 50.0f;
+        if (v < -50.0f) return -50.0f;
+        return v;
+    };
+
+    ctrl->speed_percent[0] = limit_speed(baseSpeed + correction);
+    ctrl->speed_percent[1] = limit_speed(baseSpeed - correction);
+
     speedHold(ctrl);
 }
 
-bool ChassisController::turn(double target_angle, double* accum_L, double* last_error_L, MotorCommand* ctrl)
+bool ChassisController::turn(double target_angle_diff, float current_yaw, MotorCommand* ctrl)
 {
-    // 轮距为145mm，将目标角度（顺时针为正）转换为左右轮距离
-    double track_width = 145.0;
-    double target_L = (3.1415926 * track_width * target_angle) / 360.0;
+    if (isFirstTurn) {
+        start_yaw = current_yaw;
+        last_yaw_error = 0.0f;
+        isFirstTurn = false;
+    }
 
-    // 左轮顺时针转需要向前走（正），右轮需要向后走（负）
-    double error_L0 = target_L - accum_L[0];  // 左轮误差
-    double error_L1 = -target_L - accum_L[1]; // 右轮误差
+    float target_abs_yaw = start_yaw + target_angle_diff;
+    float error = target_abs_yaw - current_yaw;
 
-    // 如果左右轮误差都在2mm以内，认为转弯完成
-    if (error_L0 < 2.0 && error_L0 > -2.0 && error_L1 < 2.0 && error_L1 > -2.0) {
+    while (error > 180.0f) error -= 360.0f;
+    while (error < -180.0f) error += 360.0f;
+
+    if (std::abs(error) < 1.5f) {
+        ctrl->speed_percent[0] = 0.0f;
+        ctrl->speed_percent[1] = 0.0f;
+        speedHold(ctrl);
         return true;
     }
 
-    // PD 控制
-    double Kp = 1.0; // P 参数，根据实际需要调节
-    double Kd = 0.5; // D 参数
+    float Kp = 1.2f;
+    float Kd = 2.0f;
+    float correction = Kp * error + Kd * (error - last_yaw_error);
 
-    ctrl->speed_percent[0] = Kp * error_L0 + Kd * (error_L0 - last_error_L[0]);
-    ctrl->speed_percent[1] = Kp * error_L1 + Kd * (error_L1 - last_error_L[1]);
+    auto limit_speed = [](float v) -> float {
+        if (v > 35.0f) return 35.0f;
+        if (v < -35.0f) return -35.0f;
+        return v;
+    };
 
+    ctrl->speed_percent[0] = limit_speed(correction);
+    ctrl->speed_percent[1] = limit_speed(-correction);
+
+    last_yaw_error = error;
     speedHold(ctrl);
-
-    last_error_L[0] = error_L0;
-    last_error_L[1] = error_L1;
-
     return false;
 }
 
