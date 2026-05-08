@@ -9,6 +9,18 @@ void ChassisController::begin()
     centerPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
     centerPID.SetMode(QuickPID::Control::automatic);
 
+    speedLPID.SetTunings(400.0f, 2000.0f, 0.03f);  // 速度 PID 左轮: I=2000 快速突破死区
+    speedLPID.SetOutputLimits(-100.0f, 100.0f);      // ±100 兼容直行+转弯倒车
+    speedLPID.SetSampleTimeUs(10000);
+    speedLPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
+    speedLPID.SetMode(QuickPID::Control::automatic);
+
+    speedRPID.SetTunings(400.0f, 2000.0f, 0.03f);  // 速度 PID 右轮: I=2000
+    speedRPID.SetOutputLimits(-100.0f, 100.0f);
+    speedRPID.SetSampleTimeUs(10000);
+    speedRPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
+    speedRPID.SetMode(QuickPID::Control::automatic);
+
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
     waitForStartButton();
     osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever); // 获取初始航向角
@@ -24,24 +36,28 @@ void ChassisController::setAction(RobotAction action)
     switch (action){
         case RobotAction::MOVE_FORWARD:
             moveState = MoveState::FORWARD;
+            isFirstForward = true;
             break;
 
         case RobotAction::TURN_LEFT:
             nextTurn = TurnDirection::LEFT;
-            target_yaw = -90.0;
+            target_yaw = 90.0;   // 左转 → yaw 增（左后+右前）
             moveState = MoveState::PRE_TURN;
+            isFirstPreTurn = true;
             break;
 
         case RobotAction::TURN_RIGHT:
             nextTurn = TurnDirection::RIGHT;
-            target_yaw = 90.0;
+            target_yaw = -90.0;  // 右转 → yaw 减（左前+右后）
             moveState = MoveState::PRE_TURN;
+            isFirstPreTurn = true;
             break;
 
         case RobotAction::TURN_BACK:
             nextTurn = TurnDirection::BACK;
             target_yaw = 180.0;
             moveState = MoveState::TURN;
+            isFirstTurn = true;
             break;
 
         default:
@@ -56,7 +72,7 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
 
     switch(moveState){
         case MoveState::FORWARD:
-            forward(&cmd, 30.0, BASE_RIGHT_D, &currentSensorData, &lastSensorData);
+            forward(&cmd, BASE_FORWORD_SPEED, BASE_RIGHT_D, &currentSensorData, &lastSensorData);
             if(currentSensorData.distance[1] < FRONT_STOP_D || shouldTurn(walls)){
                 currentAction = RobotAction::IDLE;
                 moveState = MoveState::STOP;
@@ -66,14 +82,42 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
         case MoveState::PRE_TURN:
             if(isFirstPreTurn){
                 firstPreTurnL = currentSensorData.L[0];
+                firstPreTurnR = currentSensorData.L[1];
                 isFirstPreTurn = false;
-            }
-            if(currentSensorData.L[0] - firstPreTurnL > 30){ 
-                moveState = MoveState::TURN;
-                isFirstPreTurn = true;
-                isFirstTurn = true;
+                speedLPID.Reset();  // 清空上一步遗留的 I 项
+                speedRPID.Reset();
             } else {
-                forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
+                // 距离 PID：用剩余距离折算目标速度，再由速度 PID 跟踪
+                float distL = currentSensorData.L[0] - firstPreTurnL;
+                float distR = currentSensorData.L[1] - firstPreTurnR;
+                float distAvg = (distL + distR) * 0.5f;
+                float distRemain = PRE_TURN_D - distAvg;
+
+                if (distRemain <= 0.0f && distAvg >= PRE_TURN_D - 5.0f) {
+                    // 双条件：剩余距离≤0 且 平均≥目标-5mm（防止编码器跳变误触发）
+                    moveState = MoveState::TURN;
+                    isFirstPreTurn = true;
+                    isFirstTurn = true;
+                } else if (distRemain > 0.0f) {
+                    // 距离→速度映射：剩余越多越快，自然减速
+                    float targetSpeed = distRemain * 0.005f;
+                    if (targetSpeed > 0.15f) targetSpeed = 0.15f;
+                    if (targetSpeed < 0.03f) targetSpeed = 0.03f;
+
+                    speedL_setpoint = targetSpeed;
+                    speedL_input    = currentSensorData.speed[0];
+                    speedLPID.Compute();
+                    cmd.speed_percent[0] = speedL_output;
+
+                    speedR_setpoint = targetSpeed;
+                    speedR_input    = currentSensorData.speed[1];
+                    speedRPID.Compute();
+                    cmd.speed_percent[1] = speedR_output;
+                } else {
+                    // distRemain≤0 但 distAvg 未达标：编码器跳变，继续慢推
+                    cmd.speed_percent[0] = 20.0f;
+                    cmd.speed_percent[1] = 20.0f;
+                }
             }
             break;
 
@@ -87,14 +131,39 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
         case MoveState::AFTER_TURN:
             if(isFirstAfterTurn){
                 firstAfterTurnL = currentSensorData.L[0];
+                firstAfterTurnR = currentSensorData.L[1];
                 isFirstAfterTurn = false;
-            }
-            if(currentSensorData.L[0] - firstAfterTurnL > 30){ 
-                moveState = MoveState::STOP;
-                currentAction = RobotAction::IDLE;
-                isFirstAfterTurn = true;
+                speedLPID.Reset();  // 清空转弯前遗留的 I 项
+                speedRPID.Reset();
             } else {
-                forward_withDiff(&cmd, BASE_SPEED, &currentSensorData, &lastSensorData);
+                // 距离 PID（同 PRE_TURN）
+                float distL = currentSensorData.L[0] - firstAfterTurnL;
+                float distR = currentSensorData.L[1] - firstAfterTurnR;
+                float distAvg = (distL + distR) * 0.5f;
+                float distRemain = AFTER_TURN_D - distAvg;
+
+                if (distRemain <= 0.0f && distAvg >= AFTER_TURN_D - 5.0f) {
+                    moveState = MoveState::STOP;
+                    currentAction = RobotAction::IDLE;
+                    isFirstAfterTurn = true;
+                } else if (distRemain > 0.0f) {
+                    float targetSpeed = distRemain * 0.005f;
+                    if (targetSpeed > 0.15f) targetSpeed = 0.15f;
+                    if (targetSpeed < 0.03f) targetSpeed = 0.03f;
+
+                    speedL_setpoint = targetSpeed;
+                    speedL_input    = currentSensorData.speed[0];
+                    speedLPID.Compute();
+                    cmd.speed_percent[0] = speedL_output;
+
+                    speedR_setpoint = targetSpeed;
+                    speedR_input    = currentSensorData.speed[1];
+                    speedRPID.Compute();
+                    cmd.speed_percent[1] = speedR_output;
+                } else {
+                    cmd.speed_percent[0] = 20.0f;
+                    cmd.speed_percent[1] = 20.0f;
+                }
             }
             break;
 
@@ -140,7 +209,7 @@ void ChassisController::gotoStartPlace()
             moveState = MoveState::STOP;
             break;
         }
-        forward_withDiff(&cmd, 30.0, &currentSensorData, &lastSensorData);
+        forward_withDiff(&cmd, 0.05, &currentSensorData, &lastSensorData);
         osMessageQueuePut(xMotorQueue, &cmd, 0, osWaitForever);
         lastSensorData = currentSensorData;
     }
@@ -159,28 +228,31 @@ void ChassisController::speedHold(MotorCommand* input)
     }
 }
 
-void ChassisController::forward_withDiff(MotorCommand* ctrl, double baseSpeed, SensorData* sensorData, SensorData* lastSensorData)
+void ChassisController::forward_withDiff(MotorCommand* ctrl, double targetSpeed, SensorData* sensorData, SensorData* lastSensorData)
 {
-    // 目标是让左右轮速度一致，保持直线行驶
-    // 取差值为：左轮速度 - 右轮速度
-    double diff = sensorData->speed[0] - sensorData->speed[1];
-    double last_diff = lastSensorData->speed[0] - lastSensorData->speed[1];
+    // 速度 PID 控直：左右轮各自独立追踪目标速度 targetSpeed (m/s)
+    // PID 输出直接 = PWM 占空比(%)，积分项自然克服电机死区
+    float physLeft  = sensorData->speed[0];
+    float physRight = sensorData->speed[1];
 
-    // PD 控制参数（针对速度差值，speed 单位如果为 m/s 值较小，Kp可能需要较大，具体请根据实际调参）
-    double Kp = 150.0; 
-    double Kd = 30.0; 
+    speedL_setpoint = (float)targetSpeed;
+    speedL_input = physLeft;
+    speedLPID.Compute();
+    float cmdL = speedL_output;
 
-    // 计算修正量：如果左轮快 (diff > 0)，需要减小左轮，增加右轮
-    double correction = Kp * diff + Kd * (diff - last_diff);
+    speedR_setpoint = (float)targetSpeed;
+    speedR_input = physRight;
+    speedRPID.Compute();
+    float cmdR = speedR_output;
 
-    ctrl->speed_percent[0] = baseSpeed - correction;
-    ctrl->speed_percent[1] = baseSpeed + correction;
-
-    speedHold(ctrl);
+    ctrl->speed_percent[0] = cmdL;
+    ctrl->speed_percent[1] = cmdR;
 }
 
 void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
 {
+    // 沿墙直行：以 baseSpeed(m/s) 为基准速度，速度 PID 跟踪，
+    //            Center PID 输出作左右速度差，自动修正离墙距离。
     static int debounce_cnt = 0;
     static float filtered_R = 100.0f;
     const float LIMIT_DIST = 150.0f;
@@ -188,52 +260,91 @@ void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double rig
 
     float read_R = sensorData->distance[2];
 
-    if (read_R >= LIMIT_DIST) {
+    if (isFirstForward) {
+        speedLPID.Reset();
+        speedRPID.Reset();
+        centerPID.Reset();
         debounce_cnt = 0;
-        filtered_R = 200.0f;
+        filtered_R = (read_R >= LIMIT_DIST) ? 200.0f : read_R;
+        isFirstForward = false;
+
+        // 首帧用当前读数喂给 centerPID 做一次 Compute，让 lastInput 更新到真实值，
+        // 避免 Reset() 后 lastInput=0 导致 dInput=filtered_R 的巨大尖峰。
+        // 这次 Compute 的输出(有尖峰)直接丢弃，不参与速度修正。
+        pid_input = filtered_R;
+        pid_setpoint = right_distance_set;
+        centerPID.Compute();
+
+        speedL_setpoint = (float)baseSpeed;
+        speedR_setpoint = (float)baseSpeed;
+
+        if (filtered_R > 120.0f) {
+            forward_withDiff(ctrl, 0.05, sensorData, lastSensorData);
+            centerPID.Reset();
+            return;
+        }
     } else {
-        if (std::abs(read_R - filtered_R) > SPIKE_THRESHOLD) {
-            debounce_cnt++;
-            if (debounce_cnt >= 5) {
+        // 右超声波消抖滤波
+        if (read_R >= LIMIT_DIST) {
+            debounce_cnt = 0;
+            filtered_R = 200.0f;
+        } else {
+            if (std::abs(read_R - filtered_R) > SPIKE_THRESHOLD) {
+                debounce_cnt++;
+                if (debounce_cnt >= 5) {
+                    filtered_R = read_R;
+                    debounce_cnt = 0;
+                }
+            } else {
                 filtered_R = read_R;
                 debounce_cnt = 0;
             }
-        } else {
-            filtered_R = read_R;
-            debounce_cnt = 0;
         }
+
+        if (filtered_R > 120.0f) {
+            forward_withDiff(ctrl, 0.05, sensorData, lastSensorData); // 无右墙时 0.05 m/s 慢速直行
+            centerPID.Reset();
+            return;
+        }
+
+        pid_input = filtered_R;
+        pid_setpoint = right_distance_set;
+        centerPID.Compute();
+        
+        float correction = pid_output;   // Center PID 输出，正值=远离右墙，负值=靠近右墙
+        // 将 PID 输出(±40)映射为速度偏置(±0.05 m/s)
+        float speedDelta = correction * 0.00125f;  // 40×0.00125 = 0.05 m/s
+        if (speedDelta >  0.05f) speedDelta =  0.05f;
+        if (speedDelta < -0.05f) speedDelta = -0.05f;
+
+        // correction>0(太近墙): 左快右慢 → 左转远离 → 正号给左
+        speedL_setpoint = (float)baseSpeed + speedDelta;
+        speedR_setpoint = (float)baseSpeed - speedDelta;
     }
 
-    if (filtered_R > 120.0f) {
-        forward_withDiff(ctrl, baseSpeed, sensorData, lastSensorData);
-        centerPID.Reset();
-        return;
-    }
+    speedL_input = sensorData->speed[0];
+    speedLPID.Compute();
+    ctrl->speed_percent[0] = speedL_output;
 
-    pid_input = filtered_R;
-    pid_setpoint = right_distance_set;
-    centerPID.Compute();
-    
-    float correction = pid_output;
-    
-    auto limit_speed = [](float v) -> float {
-        if (v > 50.0f) return 50.0f;
-        if (v < -50.0f) return -50.0f;
-        return v;
-    };
-
-    ctrl->speed_percent[0] = limit_speed(baseSpeed + correction);
-    ctrl->speed_percent[1] = limit_speed(baseSpeed - correction);
-
-    speedHold(ctrl);
+    speedR_input = sensorData->speed[1];
+    speedRPID.Compute();
+    ctrl->speed_percent[1] = speedR_output;
 }
 
 bool ChassisController::turn(double target_angle_diff, float current_yaw, MotorCommand* ctrl)
 {
+    // ★ 级联 PID：外环角度 PID → 目标速度 → 内环速度 PID（左右轮对称）
+    static float turn_error_integral = 0.0f;
+    static bool wasNearTarget = false;
+    static int  brakeFrame = 0;    // 刹车帧计数（递增）
+
     if (isFirstTurn) {
         start_yaw = current_yaw;
-        last_yaw_error = 0.0f;
-        isFirstTurn = false;
+        turn_error_integral = 0.0f;
+        wasNearTarget = false;
+        brakeFrame = 0;
+        speedLPID.Reset();
+        speedRPID.Reset();
     }
 
     float target_abs_yaw = start_yaw + target_angle_diff;
@@ -242,30 +353,96 @@ bool ChassisController::turn(double target_angle_diff, float current_yaw, MotorC
     while (error > 180.0f) error -= 360.0f;
     while (error < -180.0f) error += 360.0f;
 
-    if (std::abs(error) < 1.5f) {
-        ctrl->speed_percent[0] = 0.0f;
-        ctrl->speed_percent[1] = 0.0f;
-        speedHold(ctrl);
-        return true;
+    if (isFirstTurn) {
+        last_yaw_error = error;
+        isFirstTurn = false;
     }
 
-    float Kp = 1.2f;
-    float Kd = 2.0f;
-    float correction = Kp * error + Kd * (error - last_yaw_error);
+    // === 收敛 + 速度阈值刹车：宁可多刹几帧，不可滑过头 ===
+    if (std::abs(error) < 2.5f || brakeFrame > 0) {
+        if (brakeFrame == 0) {
+            speedLPID.Reset();   // 清空转弯累积 I，纯 P+I 制动
+            speedRPID.Reset();
+        }
+        brakeFrame++;
 
-    auto limit_speed = [](float v) -> float {
-        if (v > 35.0f) return 35.0f;
-        if (v < -35.0f) return -35.0f;
-        return v;
-    };
+        speedL_setpoint = 0.0f;
+        speedR_setpoint = 0.0f;
+        speedL_input = currentSensorData.speed[0];
+        speedLPID.Compute();
+        ctrl->speed_percent[0] = speedL_output;
+        speedR_input = currentSensorData.speed[1];
+        speedRPID.Compute();
+        ctrl->speed_percent[1] = speedR_output;
 
-    ctrl->speed_percent[0] = limit_speed(correction);
-    ctrl->speed_percent[1] = limit_speed(-correction);
+        // 前 4 帧不管速度（IIR 滞后，报告值偏大），之后等速度降到 ~0.01 以下
+        // 最大 25 帧 (250ms) 兜底
+        if (brakeFrame >= 4 &&
+            std::abs(currentSensorData.speed[0]) < 0.015f &&
+            std::abs(currentSensorData.speed[1]) < 0.015f) {
+            brakeFrame = 0;
+            ctrl->speed_percent[0] = 0.0f;
+            ctrl->speed_percent[1] = 0.0f;
+            return true;
+        }
+        if (brakeFrame >= 25) {
+            brakeFrame = 0;
+            ctrl->speed_percent[0] = 0.0f;
+            ctrl->speed_percent[1] = 0.0f;
+            return true;
+        }
+        return false;
+    }
+
+    // === 外环：角度 PID（保持原有调优）===
+    float Kp = 0.45f;
+    float Ki = 0.25f;
+    float Kd = 0.10f;
+
+    float delta_error = error - last_yaw_error;
+    while (delta_error >  180.0f) delta_error -= 360.0f;
+    while (delta_error < -180.0f) delta_error += 360.0f;
+
+    if ((error > 0 && last_yaw_error < 0) || (error < 0 && last_yaw_error > 0)) {
+        turn_error_integral = 0.0f;
+    }
+
+    turn_error_integral += error;
+    if (turn_error_integral >  100.0f) turn_error_integral =  100.0f;
+    if (turn_error_integral < -100.0f) turn_error_integral = -100.0f;
+
+    bool nearTarget = (std::abs(error) < 15.0f);
+    if (nearTarget && !wasNearTarget) {
+        turn_error_integral = 0.0f;
+    }
+    wasNearTarget = nearTarget;
+
+    float correction = Kp * error + Ki * turn_error_integral + Kd * delta_error;
+
+    // === 角度 PID 输出 → 目标速度 (m/s) ===
+    // correction 典型范围 0~65，映射到 0~0.20 m/s（降低上限减惯性过冲）
+    float targetSpeed = std::abs(correction) * 0.004f;
+    if (targetSpeed > 0.20f) targetSpeed = 0.20f;
+    if (nearTarget && targetSpeed > 0.08f) targetSpeed = 0.08f;  // 减速区软限
+    if (targetSpeed < 0.05f) targetSpeed = 0.05f;  // 保底 ≥ 0.05，编码器 ~1.7 脉冲/帧
+
+    // correction>0 → 左轮倒车、右轮前进 → yaw 增大（左转）
+    speedL_setpoint = (correction > 0) ? -targetSpeed : targetSpeed;
+    speedR_setpoint = (correction > 0) ? targetSpeed : -targetSpeed;
+
+    // === 内环：速度 PID，左右轮对称跟踪 ===
+    speedL_input = currentSensorData.speed[0];
+    speedLPID.Compute();
+    ctrl->speed_percent[0] = speedL_output;
+
+    speedR_input = currentSensorData.speed[1];
+    speedRPID.Compute();
+    ctrl->speed_percent[1] = speedR_output;
 
     last_yaw_error = error;
-    speedHold(ctrl);
     return false;
 }
+
 
 bool ChassisController::isIdle() const
 {
@@ -274,7 +451,7 @@ bool ChassisController::isIdle() const
 
 bool ChassisController::shouldTurn(const WallInfo& walls)
 {
-    if (!walls.leftWall || !walls.rightWall){
+    if (walls.frontWall || !walls.rightWall){
         return true;
     }
     return false;

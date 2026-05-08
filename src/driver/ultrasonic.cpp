@@ -36,7 +36,7 @@ SonarSensor::SonarSensor(GPIO_TypeDef* trigPort, uint16_t trigPin,
 
 void SonarSensor::Init() {
     __HAL_TIM_SET_CAPTUREPOLARITY(htimIC, timChannel, TIM_INPUTCHANNELPOLARITY_RISING);
-    HAL_StatusTypeDef ret = HAL_TIM_IC_Start_IT(htimIC, timChannel);
+    HAL_TIM_IC_Start_IT(htimIC, timChannel);
 }
 
 void SonarSensor::Trigger() {
