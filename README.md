@@ -49,16 +49,19 @@ BUCT 迷宫小车项目 (Maze Solver Robot)
 推荐使用 Visual Studio Code 配合 PlatformIO IDE 插件完成本项目的构建。
 
 代码编译：
-    $ git clone https://github.com/Molirain/buct_prac_class_car.git
-    $ cd buct_prac_class_car
-    $ pio run
+
+```
+git clone https://github.com/Molirain/buct_prac_class_car.git
+cd buct_prac_class_car
+pio run
+```
 
 固件烧录 (DFU 模式)：
 本项目 platformio.ini 默认采用 dfu-util 方式烧录。确保芯片处于 DFU 引导模式：
 1. 短接 BOOT0 引脚，复位微控制器进入 DFU 模式。
 2. 连接 USB 数据线。
 3. 执行以下命令完成烧录：
-    $ pio run -e genericSTM32H750VB -t upload
+    `pio run -e genericSTM32H750VB -t upload`
 
 许可证 (LICENSE)
 ----------------
