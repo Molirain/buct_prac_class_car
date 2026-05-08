@@ -7,6 +7,7 @@
 #include <FreeRTOS.h>
 #include "config.h"
 #include <QuickPID.h>
+#include <cmath>
 
 extern osMessageQueueId_t xSensorQueue;
 extern osMessageQueueId_t xMotorQueue;

@@ -73,7 +73,7 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
     switch(moveState){
         case MoveState::FORWARD:
             forward(&cmd, BASE_FORWORD_SPEED, BASE_RIGHT_D, &currentSensorData, &lastSensorData);
-            if(currentSensorData.distance[1] < FRONT_STOP_D || shouldTurn(walls)){
+            if(shouldTurn(walls)){
                 currentAction = RobotAction::IDLE;
                 moveState = MoveState::STOP;
             }
@@ -199,9 +199,12 @@ void ChassisController::waitForStartButton()
 
 void ChassisController::gotoStartPlace()
 {
+    int i = 0;
     for(;;){
         osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever);
         if(currentSensorData.distance[2] < 30.0){
+            i++;
+            if(i < 10) continue;
             cmd.speed_percent[0] = 0;
             cmd.speed_percent[1] = 0;
             osMessageQueuePut(xMotorQueue, &cmd, 0, osWaitForever);
