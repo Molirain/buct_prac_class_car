@@ -3,7 +3,7 @@
 #include "app/tasks.h"
 #include "main.h"
 
-#define DISTANCE_THRESHOLD 15.0 // 距离阈值，单位 cm
+#define DISTANCE_THRESHOLD 20.0 // 距离阈值，单位 cm
 
 class SensorFilter
 {
