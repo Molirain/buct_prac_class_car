@@ -220,7 +220,7 @@ int main(void)
   task_ctrlHandle = osThreadNew(DFSTaskEntry, NULL, &task_ctrl_attributes);
 
   /* creation of task_comm */
-  // task_commHandle = osThreadNew(CommTaskEnter, NULL, &task_comm_attributes);
+  task_commHandle = osThreadNew(CommTaskEnter, NULL, &task_comm_attributes);
 #endif
 
   /* USER CODE BEGIN RTOS_THREADS */

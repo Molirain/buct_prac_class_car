@@ -3,19 +3,19 @@
 
 void ChassisController::begin()
 {
-    centerPID.SetTunings(1.5f, 0.05f, 0.5f);
+    centerPID.SetTunings(0.7f, 0.08f, 0.03f);  // KP=0.7 温柔修正, KI=0.08 渐进对抗漂移, KD=0.03 阻尼
     centerPID.SetOutputLimits(-40.0f, 40.0f);
     centerPID.SetSampleTimeUs(10000);
     centerPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
     centerPID.SetMode(QuickPID::Control::automatic);
 
-    speedLPID.SetTunings(400.0f, 2000.0f, 0.03f);  // 速度 PID 左轮: I=2000 快速突破死区
+    speedLPID.SetTunings(400.0f, 2000.0f, 0.10f);  // Kd=0.15 对抗瓷砖缝瞬时差速
     speedLPID.SetOutputLimits(-100.0f, 100.0f);      // ±100 兼容直行+转弯倒车
     speedLPID.SetSampleTimeUs(10000);
     speedLPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
     speedLPID.SetMode(QuickPID::Control::automatic);
 
-    speedRPID.SetTunings(400.0f, 2000.0f, 0.03f);  // 速度 PID 右轮: I=2000
+    speedRPID.SetTunings(400.0f, 2000.0f, 0.10f);  // Kd=0.15 对抗瓷砖缝瞬时差速
     speedRPID.SetOutputLimits(-100.0f, 100.0f);
     speedRPID.SetSampleTimeUs(10000);
     speedRPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
@@ -58,6 +58,10 @@ void ChassisController::setAction(RobotAction action)
             target_yaw = 180.0;
             moveState = MoveState::TURN;
             isFirstTurn = true;
+            break;
+
+        case RobotAction::STOP_FINISH:
+            moveState = MoveState::STOP;
             break;
 
         default:
@@ -125,6 +129,9 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
             if(turn(target_yaw, currentSensorData.Yaw, &cmd)){
                 moveState = MoveState::AFTER_TURN;
                 isFirstAfterTurn = true;
+                
+                // 将动作状态置为待机，让大脑再次思考，防止大脑仍然保持上次的 TURN 导致死锁或误判
+                currentAction = RobotAction::IDLE; 
             }
             break;
 
@@ -144,7 +151,9 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
 
                 if (distRemain <= 0.0f && distAvg >= AFTER_TURN_D - 5.0f) {
                     moveState = MoveState::STOP;
-                    currentAction = RobotAction::IDLE;
+                    // AFTER_TURN 结束后，把控制权交还给大脑。由于上面 TURN 结束时已经重置过 currentAction
+                    // 这里我们就不再重复设置，只需保持 isIdle() 所需的 IDLE 即可。
+                    currentAction = RobotAction::IDLE; 
                     isFirstAfterTurn = true;
                 } else if (distRemain > 0.0f) {
                     float targetSpeed = distRemain * 0.005f;
@@ -254,76 +263,48 @@ void ChassisController::forward_withDiff(MotorCommand* ctrl, double targetSpeed,
 
 void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
 {
-    // 沿墙直行：以 baseSpeed(m/s) 为基准速度，速度 PID 跟踪，
-    //            Center PID 输出作左右速度差，自动修正离墙距离。
-    static int debounce_cnt = 0;
-    static float filtered_R = 100.0f;
-    const float LIMIT_DIST = 150.0f;
-    const float SPIKE_THRESHOLD = 30.0f;
+    // 编码器直行 + 右墙三区纠正（纯 bang-bang，不用 PID，不碰速度 PID）
+    const float WALL_CLOSE = 5.0f;    // <5cm = 太近 → 左转远离
+    const float WALL_FAR   = 16.0f;   // >16cm = 太远 → 右转靠近
+    const float NUDGE      = 0.04f;   // 速度偏置 (m/s)
+    const int   CONFIRM    = 2;       // 连续确认帧数
 
-    float read_R = sensorData->distance[2];
+    static int  closeCount = 0;
+    static int  farCount   = 0;
+    static float nudge     = 0.0f;
 
     if (isFirstForward) {
         speedLPID.Reset();
         speedRPID.Reset();
-        centerPID.Reset();
-        debounce_cnt = 0;
-        filtered_R = (read_R >= LIMIT_DIST) ? 200.0f : read_R;
+        closeCount = 0;
+        farCount = 0;
+        nudge = 0.0f;
         isFirstForward = false;
-
-        // 首帧用当前读数喂给 centerPID 做一次 Compute，让 lastInput 更新到真实值，
-        // 避免 Reset() 后 lastInput=0 导致 dInput=filtered_R 的巨大尖峰。
-        // 这次 Compute 的输出(有尖峰)直接丢弃，不参与速度修正。
-        pid_input = filtered_R;
-        pid_setpoint = right_distance_set;
-        centerPID.Compute();
-
-        speedL_setpoint = (float)baseSpeed;
-        speedR_setpoint = (float)baseSpeed;
-
-        if (filtered_R > 120.0f) {
-            forward_withDiff(ctrl, 0.05, sensorData, lastSensorData);
-            centerPID.Reset();
-            return;
-        }
-    } else {
-        // 右超声波消抖滤波
-        if (read_R >= LIMIT_DIST) {
-            debounce_cnt = 0;
-            filtered_R = 200.0f;
-        } else {
-            if (std::abs(read_R - filtered_R) > SPIKE_THRESHOLD) {
-                debounce_cnt++;
-                if (debounce_cnt >= 5) {
-                    filtered_R = read_R;
-                    debounce_cnt = 0;
-                }
-            } else {
-                filtered_R = read_R;
-                debounce_cnt = 0;
-            }
-        }
-
-        if (filtered_R > 120.0f) {
-            forward_withDiff(ctrl, 0.05, sensorData, lastSensorData); // 无右墙时 0.05 m/s 慢速直行
-            centerPID.Reset();
-            return;
-        }
-
-        pid_input = filtered_R;
-        pid_setpoint = right_distance_set;
-        centerPID.Compute();
-        
-        float correction = pid_output;   // Center PID 输出，正值=远离右墙，负值=靠近右墙
-        // 将 PID 输出(±40)映射为速度偏置(±0.05 m/s)
-        float speedDelta = correction * 0.00125f;  // 40×0.00125 = 0.05 m/s
-        if (speedDelta >  0.05f) speedDelta =  0.05f;
-        if (speedDelta < -0.05f) speedDelta = -0.05f;
-
-        // correction>0(太近墙): 左快右慢 → 左转远离 → 正号给左
-        speedL_setpoint = (float)baseSpeed + speedDelta;
-        speedR_setpoint = (float)baseSpeed - speedDelta;
     }
+
+    float read_R = sensorData->distance[2];
+
+    // ---- 三区判断 + 连续确认 ----
+    if (read_R >= 3.0f && read_R < 120.0f) {
+        if (read_R < WALL_CLOSE) {
+            closeCount++;
+            farCount = 0;
+            if (closeCount >= CONFIRM) nudge = +NUDGE;   // 太近 → 左轮减速右轮加速 = 左转远离
+        } else if (read_R > WALL_FAR) {
+            farCount++;
+            closeCount = 0;
+            if (farCount >= CONFIRM) nudge = -NUDGE;      // 太远 → 左轮加速右轮减速 = 右转靠近
+        } else {
+            // 5~16cm 死区：OK，缓慢衰减上次修正
+            closeCount = 0;
+            farCount = 0;
+            nudge *= 0.5f;
+        }
+    }
+    // 无效读数（<3 或 ≥120）：保持 nudge & 计数器不变
+
+    speedL_setpoint = (float)baseSpeed - nudge;
+    speedR_setpoint = (float)baseSpeed + nudge;
 
     speedL_input = sensorData->speed[0];
     speedLPID.Compute();

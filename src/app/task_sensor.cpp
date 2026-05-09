@@ -16,7 +16,7 @@ extern UART_HandleTypeDef huart1;
 static const EncoderConfig kEncoderCfg = {
     .wheelDiameter_m = 0.048f,   // 48mm 轮径（根据实物修改）
     .gearRatio       = 20.0f,    // 实际减速比 1:20
-    .encoderLines    = 13,       // 霍尔13线；GMR编码器改为500
+    .encoderLines    = 13,       // 霍尔13线
     .decodeMultiplier = 2.0f,    // 按实测标定：当前硬件计数等效 2 倍频
     .dt_s            = 0.01f,    // 10ms 控制周期
     .alpha           = 0.3f,     // IIR滤波系数 (0,1]，越小越平滑
