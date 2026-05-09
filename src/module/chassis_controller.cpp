@@ -3,12 +3,6 @@
 
 void ChassisController::begin()
 {
-    centerPID.SetTunings(0.7f, 0.08f, 0.03f);  // KP=0.7 温柔修正, KI=0.08 渐进对抗漂移, KD=0.03 阻尼
-    centerPID.SetOutputLimits(-40.0f, 40.0f);
-    centerPID.SetSampleTimeUs(10000);
-    centerPID.SetAntiWindupMode(QuickPID::iAwMode::iAwClamp);
-    centerPID.SetMode(QuickPID::Control::automatic);
-
     speedLPID.SetTunings(400.0f, 2000.0f, 0.10f);  // Kd=0.15 对抗瓷砖缝瞬时差速
     speedLPID.SetOutputLimits(-100.0f, 100.0f);      // ±100 兼容直行+转弯倒车
     speedLPID.SetSampleTimeUs(10000);
@@ -118,9 +112,16 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                     speedRPID.Compute();
                     cmd.speed_percent[1] = speedR_output;
                 } else {
-                    // distRemain≤0 但 distAvg 未达标：编码器跳变，继续慢推
-                    cmd.speed_percent[0] = 20.0f;
-                    cmd.speed_percent[1] = 20.0f;
+                    // distRemain≤0 但 distAvg 未达标：编码器跳变，继续龟速 PID 跟踪
+                    speedL_setpoint = 0.05f;
+                    speedL_input    = currentSensorData.speed[0];
+                    speedLPID.Compute();
+                    cmd.speed_percent[0] = speedL_output;
+
+                    speedR_setpoint = 0.05f;
+                    speedR_input    = currentSensorData.speed[1];
+                    speedRPID.Compute();
+                    cmd.speed_percent[1] = speedR_output;
                 }
             }
             break;
@@ -170,8 +171,16 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                     speedRPID.Compute();
                     cmd.speed_percent[1] = speedR_output;
                 } else {
-                    cmd.speed_percent[0] = 20.0f;
-                    cmd.speed_percent[1] = 20.0f;
+                    // distRemain≤0 但 distAvg 未达标：编码器跳变，继续龟速 PID 跟踪
+                    speedL_setpoint = 0.05f;
+                    speedL_input    = currentSensorData.speed[0];
+                    speedLPID.Compute();
+                    cmd.speed_percent[0] = speedL_output;
+
+                    speedR_setpoint = 0.05f;
+                    speedR_input    = currentSensorData.speed[1];
+                    speedRPID.Compute();
+                    cmd.speed_percent[1] = speedR_output;
                 }
             }
             break;

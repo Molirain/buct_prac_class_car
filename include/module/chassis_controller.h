@@ -22,11 +22,6 @@ class ChassisController
         void update(const SensorData& sensor, MotorCommand& cmd, const WallInfo& walls); // PID 等
 
     private:
-        float pid_input = 0.0f;
-        float pid_output = 0.0f;
-        float pid_setpoint = 0.0f;
-        QuickPID centerPID = QuickPID(&pid_input, &pid_output, &pid_setpoint);
-
         float speedL_input = 0.0f;
         float speedL_output = 0.0f;
         float speedL_setpoint = 0.0f;
