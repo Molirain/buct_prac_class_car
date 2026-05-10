@@ -1,7 +1,7 @@
 // 底盘控制类（脊髓）
 #include "module/chassis_controller.h"
 
-void ChassisController::begin()
+StartButton ChassisController::begin()
 {
     speedLPID.SetTunings(400.0f, 2000.0f, 0.10f);  // Kd=0.15 对抗瓷砖缝瞬时差速
     speedLPID.SetOutputLimits(-100.0f, 100.0f);      // ±100 兼容直行+转弯倒车
@@ -16,11 +16,12 @@ void ChassisController::begin()
     speedRPID.SetMode(QuickPID::Control::automatic);
 
     osDelay(pdMS_TO_TICKS(3000)); // 等待陀螺仪校准
-    waitForStartButton();
+    StartButton which = waitForStartButton();
     osMessageQueueGet(xSensorQueue, &currentSensorData, NULL, osWaitForever); // 获取初始航向角
     // 初始化 lastSensorData，防止未初始化的垃圾数据干扰第一次PID
     lastSensorData = currentSensorData;
     gotoStartPlace();
+    return which;
 }
 
 void ChassisController::setAction(RobotAction action)
@@ -35,7 +36,7 @@ void ChassisController::setAction(RobotAction action)
 
         case RobotAction::TURN_LEFT:
             nextTurn = TurnDirection::LEFT;
-            target_yaw = 90.0;   // 左转 → yaw 增（左后+右前）
+            target_yaw = 87.0;   // 左转 → yaw 增（左后+右前）
             moveState = MoveState::PRE_TURN;
             isFirstPreTurn = true;
             break;
@@ -102,12 +103,22 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                     if (targetSpeed > 0.15f) targetSpeed = 0.15f;
                     if (targetSpeed < 0.03f) targetSpeed = 0.03f;
 
-                    speedL_setpoint = targetSpeed;
+                    // 编码器距离差修正：差>2mm才介入，防止微小噪声引起振荡
+                    // distDiff > 0 表示左轮走得多（车向右偏），需要加大右轮速度
+                    float distDiff = distL - distR;
+                    float diffCorr = 0.0f;
+                    if (distDiff > 2.0f || distDiff < -2.0f) {
+                        diffCorr = distDiff * 0.003f;  // 3‰/mm 增益（原8‰振荡）
+                        if (diffCorr >  targetSpeed * 0.3f) diffCorr =  targetSpeed * 0.3f;
+                        if (diffCorr < -targetSpeed * 0.3f) diffCorr = -targetSpeed * 0.3f;
+                    }
+
+                    speedL_setpoint = targetSpeed - diffCorr;
                     speedL_input    = currentSensorData.speed[0];
                     speedLPID.Compute();
                     cmd.speed_percent[0] = speedL_output;
 
-                    speedR_setpoint = targetSpeed;
+                    speedR_setpoint = targetSpeed + diffCorr;
                     speedR_input    = currentSensorData.speed[1];
                     speedRPID.Compute();
                     cmd.speed_percent[1] = speedR_output;
@@ -132,7 +143,7 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                 isFirstAfterTurn = true;
                 
                 // 将动作状态置为待机，让大脑再次思考，防止大脑仍然保持上次的 TURN 导致死锁或误判
-                currentAction = RobotAction::IDLE; 
+                // currentAction = RobotAction::IDLE; 
             }
             break;
 
@@ -161,12 +172,21 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
                     if (targetSpeed > 0.15f) targetSpeed = 0.15f;
                     if (targetSpeed < 0.03f) targetSpeed = 0.03f;
 
-                    speedL_setpoint = targetSpeed;
+                    // 编码器距离差修正：差>2mm才介入，防止微小噪声引起振荡
+                    float distDiff = distL - distR;
+                    float diffCorr = 0.0f;
+                    if (distDiff > 2.0f || distDiff < -2.0f) {
+                        diffCorr = distDiff * 0.003f;
+                        if (diffCorr >  targetSpeed * 0.3f) diffCorr =  targetSpeed * 0.3f;
+                        if (diffCorr < -targetSpeed * 0.3f) diffCorr = -targetSpeed * 0.3f;
+                    }
+
+                    speedL_setpoint = targetSpeed - diffCorr;
                     speedL_input    = currentSensorData.speed[0];
                     speedLPID.Compute();
                     cmd.speed_percent[0] = speedL_output;
 
-                    speedR_setpoint = targetSpeed;
+                    speedR_setpoint = targetSpeed + diffCorr;
                     speedR_input    = currentSensorData.speed[1];
                     speedRPID.Compute();
                     cmd.speed_percent[1] = speedR_output;
@@ -198,17 +218,29 @@ void ChassisController::update(const SensorData& sensor, MotorCommand& cmd, cons
     lastSensorData = currentSensorData;
 }
 
-void ChassisController::waitForStartButton()
+StartButton ChassisController::waitForStartButton()
 {    
     for(;;){
+        // 检查 START 按钮（右手法则）
         if(HAL_GPIO_ReadPin(BTN_START_GPIO_Port, BTN_START_Pin) == GPIO_PIN_RESET){
             osDelay(20);
             if (HAL_GPIO_ReadPin(BTN_START_GPIO_Port, BTN_START_Pin) == GPIO_PIN_RESET){
                 while(HAL_GPIO_ReadPin(BTN_START_GPIO_Port, BTN_START_Pin) == GPIO_PIN_RESET){
                     osDelay(10);
                 }
-                HAL_UART_Transmit(&huart1, (uint8_t*)"Button Pressed! Go!\r\n", 21, 100);
-                break;
+                HAL_UART_Transmit(&huart1, (uint8_t*)"START Pressed! Right-Hand!\r\n", 29, 100);
+                return StartButton::START;
+            }
+        }
+        // 检查 SEND 按钮（左手法则）
+        if(HAL_GPIO_ReadPin(BTN_SEND_GPIO_Port, BTN_SEND_Pin) == GPIO_PIN_RESET){
+            osDelay(20);
+            if (HAL_GPIO_ReadPin(BTN_SEND_GPIO_Port, BTN_SEND_Pin) == GPIO_PIN_RESET){
+                while(HAL_GPIO_ReadPin(BTN_SEND_GPIO_Port, BTN_SEND_Pin) == GPIO_PIN_RESET){
+                    osDelay(10);
+                }
+                HAL_UART_Transmit(&huart1, (uint8_t*)"SEND Pressed! Left-Hand!\r\n", 28, 100);
+                return StartButton::SEND;
             }
         }
         osDelay(10);
@@ -272,48 +304,27 @@ void ChassisController::forward_withDiff(MotorCommand* ctrl, double targetSpeed,
 
 void ChassisController::forward(MotorCommand* ctrl, double baseSpeed, double right_distance_set, SensorData* sensorData, SensorData* lastSensorData)
 {
-    // 编码器直行 + 右墙三区纠正（纯 bang-bang，不用 PID，不碰速度 PID）
-    const float WALL_CLOSE = 5.0f;    // <5cm = 太近 → 左转远离
-    const float WALL_FAR   = 16.0f;   // >16cm = 太远 → 右转靠近
-    const float NUDGE      = 0.04f;   // 速度偏置 (m/s)
-    const int   CONFIRM    = 2;       // 连续确认帧数
-
-    static int  closeCount = 0;
-    static int  farCount   = 0;
-    static float nudge     = 0.0f;
+    // 编码器直行 + 陀螺仪角度修正
+    static float forward_start_yaw = 0.0f;
 
     if (isFirstForward) {
         speedLPID.Reset();
         speedRPID.Reset();
-        closeCount = 0;
-        farCount = 0;
-        nudge = 0.0f;
+        forward_start_yaw = sensorData->Yaw;
         isFirstForward = false;
     }
 
-    float read_R = sensorData->distance[2];
+    // 偏航角修正
+    // Yaw 增大代表车头向左偏，需要左轮加速、右轮减速来向右回正
+    float yaw_error = sensorData->Yaw - forward_start_yaw;
+    float yawCorr = yaw_error * 0.005f;  // 增益可调，0.005 意味着每偏 1 度修正 0.005 m/s
 
-    // ---- 三区判断 + 连续确认 ----
-    if (read_R >= 3.0f && read_R < 120.0f) {
-        if (read_R < WALL_CLOSE) {
-            closeCount++;
-            farCount = 0;
-            if (closeCount >= CONFIRM) nudge = +NUDGE;   // 太近 → 左轮减速右轮加速 = 左转远离
-        } else if (read_R > WALL_FAR) {
-            farCount++;
-            closeCount = 0;
-            if (farCount >= CONFIRM) nudge = -NUDGE;      // 太远 → 左轮加速右轮减速 = 右转靠近
-        } else {
-            // 5~16cm 死区：OK，缓慢衰减上次修正
-            closeCount = 0;
-            farCount = 0;
-            nudge *= 0.5f;
-        }
-    }
-    // 无效读数（<3 或 ≥120）：保持 nudge & 计数器不变
+    // 限幅 ±30% 基础速度
+    if (yawCorr >  baseSpeed * 0.3f) yawCorr =  baseSpeed * 0.3f;
+    if (yawCorr < -baseSpeed * 0.3f) yawCorr = -baseSpeed * 0.3f;
 
-    speedL_setpoint = (float)baseSpeed - nudge;
-    speedR_setpoint = (float)baseSpeed + nudge;
+    speedL_setpoint = (float)baseSpeed + yawCorr;
+    speedR_setpoint = (float)baseSpeed - yawCorr;
 
     speedL_input = sensorData->speed[0];
     speedLPID.Compute();
@@ -444,8 +455,16 @@ bool ChassisController::isIdle() const
 
 bool ChassisController::shouldTurn(const WallInfo& walls)
 {
-    if (walls.frontWall || !walls.rightWall){
-        return true;
+    if (isLeftHand) {
+        // 左手法则：前有墙 或 左边没墙 → 该转弯了
+        if (walls.frontWall || !walls.leftWall) {
+            return true;
+        }
+    } else {
+        // 右手法则：前有墙 或 右边没墙 → 该转弯了
+        if (walls.frontWall || !walls.rightWall) {
+            return true;
+        }
     }
     return false;
 }

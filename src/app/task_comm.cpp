@@ -17,13 +17,14 @@ void AppTaskComm(void *argument) {
     // 2. 任务无限循环
     for(;;) {
         // 打印三个方向的原始距离和滤波后的墙壁状态 (1有墙，0无墙)，以及大脑最后一次做出的决断
-        int len = snprintf(buf, sizeof(buf), "L:%05.1f F:%05.1f R:%05.1f | WL:%d WF:%d WR:%d | ACT:%d\r\n", 
+        int len = snprintf(buf, sizeof(buf), "L:%05.1f F:%05.1f R:%05.1f | WL:%d WF:%d WR:%d | Yaw:%05.1f | ACT:%d\r\n", 
                            sensorData.distance[0], 
                            sensorData.distance[1], 
                            sensorData.distance[2],
                            g_walls.leftWall,
                            g_walls.frontWall,
                            g_walls.rightWall,
+                            sensorData.Yaw,
                            (int)g_lastAction);
         HAL_UART_Transmit(&huart1, (uint8_t*)buf, len, 100);
         

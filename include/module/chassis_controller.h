@@ -13,11 +13,18 @@ extern osMessageQueueId_t xSensorQueue;
 extern osMessageQueueId_t xMotorQueue;
 extern UART_HandleTypeDef huart1;
 
+// 启动按钮类型：START = 右手法则, SEND = 左手法则
+enum class StartButton {
+    START,  // 右手法则
+    SEND    // 左手法则
+};
+
 class ChassisController
 {
     public:
-        void begin();
+        StartButton begin();
         void setAction(RobotAction action);
+        void setLeftHandMode(bool left) { isLeftHand = left; }  // true=左手法则, false=右手法则
         bool isIdle() const; // 判断是否处于待机状态
         void update(const SensorData& sensor, MotorCommand& cmd, const WallInfo& walls); // PID 等
 
@@ -46,6 +53,7 @@ class ChassisController
         bool isFirstPreTurn = true;
         bool isFirstTurn = true;
         bool isFirstForward = true;
+        bool isLeftHand = false;     // true=左手法则（检测左墙缺口），false=右手法则（检测右墙缺口）
         float start_yaw = 0.0f;
         float last_yaw_error = 0.0f;
         double firstAfterTurnL = 0; // 转弯后前进的起始里程（左）
@@ -53,7 +61,7 @@ class ChassisController
         double firstPreTurnL = 0; // 转弯前前进的起始里程（左）
         double firstPreTurnR = 0; // 转弯前前进的起始里程（右）
 
-        void waitForStartButton();
+        StartButton waitForStartButton();
         void speedHold(MotorCommand* input);
         void gotoStartPlace();
         void forward_withDiff(MotorCommand* ctrl, double baseSpeed,

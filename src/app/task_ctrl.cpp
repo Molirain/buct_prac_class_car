@@ -4,6 +4,7 @@
 #include "module/chassis_controller.h"
 #include "module/sensor_filter.h"
 #include "module/right_hand_strategy.h"
+#include "module/left_hand_strategy.h"
 #include "module/maze_strategy.h" 
 #include "config.h"
 
@@ -14,7 +15,8 @@ extern UART_HandleTypeDef huart1;
 // 模块实例化
 static SensorFilter filter;
 static ChassisController chassis;
-static RightHandStrategy rightHandBrain; 
+static RightHandStrategy rightHandBrain;
+static LeftHandStrategy  leftHandBrain; 
 
 WallInfo g_walls; // 供串口任务直接读取的全局变量
 RobotAction g_lastAction = RobotAction::IDLE; // 供串口打印最后一次大脑决断
@@ -29,12 +31,20 @@ void AppTaskCtrl(void *argument) {
     int currentY = 0;
     int currentHeading = 0; // 0:北, 1:东, 2:南, 3:西
 
-    // 多态指针
-    // 测试算法，改成 = &smartBrain; 即可切换
-    MazeStrategy* brain = &rightHandBrain; 
+    // 多态指针 — 根据按下的是 START（右手）还是 SEND（左手）来选择策略
+    MazeStrategy* brain = nullptr;
 
-    // 陀螺仪校准延迟、等待按键按下、以及进入初始格子
-    chassis.begin(); 
+    // 陀螺仪校准延迟、等待按键按下、以及进入初始格子；返回按了哪个键
+    StartButton which = chassis.begin();
+    if (which == StartButton::SEND) {
+        brain = &leftHandBrain;
+        chassis.setLeftHandMode(true);   // 告诉底盘：左手法则，检测左墙缺口
+        HAL_UART_Transmit(&huart1, (uint8_t*)"Strategy: Left-Hand Rule\r\n", 26, 100);
+    } else {
+        brain = &rightHandBrain;
+        chassis.setLeftHandMode(false);  // 告诉底盘：右手法则，检测右墙缺口
+        HAL_UART_Transmit(&huart1, (uint8_t*)"Strategy: Right-Hand Rule\r\n", 27, 100);
+    }
 
     // gotoStartPlace 后车身可能没摆正。持续读传感器直到右墙被连续确认 5 帧，最多等 60 帧（6秒）。
     int primeStable = 0;
@@ -72,11 +82,13 @@ void AppTaskCtrl(void *argument) {
                     }
                 }
 
-                // 【起步防护】：forward 刚开始 30 帧内，右转极可能是车身未摆正导致的。
-                // 此时如果左墙也没检测到（非真正路口），强制接管为 MOVE_FORWARD。
-                if (action == RobotAction::TURN_RIGHT && startupGuard < 30) {
-                    if (!walls.leftWall) {
-                        action = RobotAction::MOVE_FORWARD;
+                // 【起步防护】：forward 刚开始 30 帧内，转向极可能是车身未摆正导致的。
+                if (startupGuard < 30) {
+                    if (action == RobotAction::TURN_RIGHT && !walls.leftWall) {
+                        action = RobotAction::MOVE_FORWARD;   // 右手法则：右转误判
+                    }
+                    if (action == RobotAction::TURN_LEFT && !walls.rightWall) {
+                        action = RobotAction::MOVE_FORWARD;   // 左手法则：左转误判
                     }
                 }
 
